@@ -1,5 +1,7 @@
 # MikroChat
 
+![Icon](./icons/icon-48x48.png)
+
 **The minimalist chat app that's all yours**.
 
 MikroChat is a minimalistic, back-to-basics, and complete chat application for those tired of expensive bills, vendor lock-in, and distractions.
