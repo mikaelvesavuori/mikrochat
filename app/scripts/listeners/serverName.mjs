@@ -1,0 +1,1 @@
+serverName.addEventListener('click', openServerSettingsModal);

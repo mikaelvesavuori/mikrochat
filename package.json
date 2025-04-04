@@ -1,0 +1,72 @@
+{
+  "name": "mikrochat",
+  "description": "The minimalist chat app that's all yours",
+  "version": "1.0.0",
+  "author": "Mikael Vesavuori",
+  "license": "MIT",
+  "keywords": [
+    "chat",
+    "chat-app",
+    "slack-replacement",
+    "discord-replacement",
+    "teams-replacement"
+  ],
+  "main": "lib/index.js",
+  "module": "lib/index.mjs",
+  "sideEffects": [
+    "./app/scripts/*.mjs"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mikaelvesavuori/mikrochat"
+  },
+  "bugs": {
+    "url": "https://github.com/mikaelvesavuori/mikrochat/issues"
+  },
+  "homepage": "https://github.com/mikaelvesavuori/mikrochat",
+  "files": [
+    "/lib",
+    "!/lib/**/*.map",
+    "!/tests"
+  ],
+  "scripts": {
+    "start": "npx tsx src/index.ts",
+    "dev": "npx http-server -p 8080 ./app",
+    "dev:https": "npx http-server -p 8080 -S -C cert.pem ./app",
+    "dev:reload": "npm run build:web && mv dist/mikrochat.min.js app && clear && npm start",
+    "test": "npm run lint && npm run test:unit",
+    "test:unit": "npx vitest run --coverage",
+    "test:watch": "npx vitest --watch",
+    "build": "npm run clean && npm run build:web && npm run build:api",
+    "build:web": "rm -rf dist && mkdir dist && node build.mjs && npm run move:webapp:files",
+    "build:api": "npm run build:esm && npm run build:cjs",
+    "build:esm": "node esbuild.config.mjs --esm",
+    "build:cjs": "node esbuild.config.mjs --cjs",
+    "move:webapp:files": "cp -R icons dist && cp app/mikrosafe.min.js dist && cp app/manifest.json dist && cp app/offline.html dist && cp app/pwa.js dist && cp app/service-worker.js dist",
+    "clean": "rm -rf lib && rm -rf dist && mkdir lib",
+    "lint": "npx @biomejs/biome check --write ./src",
+    "package": "npm pack",
+    "prepublishOnly": "npm run build",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1",
+    "@types/node": "latest",
+    "@vitest/coverage-v8": "2",
+    "esbuild": "latest",
+    "html-minifier-terser": "7",
+    "http-server": "14",
+    "husky": "9",
+    "lightningcss": "1",
+    "tsup": "8",
+    "tsx": "4",
+    "typescript": "5",
+    "vitest": "2"
+  },
+  "dependencies": {
+    "mikroauth": "latest",
+    "mikroconf": "latest",
+    "mikroid": "latest",
+    "mikroserve": "latest"
+  }
+}

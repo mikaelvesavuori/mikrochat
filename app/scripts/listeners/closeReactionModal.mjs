@@ -1,0 +1,1 @@
+closeReactionModal.addEventListener('click', closeReactionPicker);

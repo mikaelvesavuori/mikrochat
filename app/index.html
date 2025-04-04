@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>MikroChat</title>
+    <link href="styles.css" rel="stylesheet">
+
+    <meta meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+    <meta name="description" content="The minimalist chat app that's all yours.">
+    <meta name="theme-color" content="#5761f2">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="MikroChat">
+
+    <link rel="icon" href="/icons/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
+
+    <link rel="manifest" href="/manifest.json">
+
+    <!--
+    <meta http-equiv="Content-Security-Policy" content="
+      default-src 'self';
+      script-src 'self';
+      connect-src 'self' http://localhost:3000;
+      img-src 'self' data:;
+      style-src 'self' 'unsafe-inline';
+      font-src 'self';
+      frame-src 'none';
+      object-src 'none';
+      base-uri 'self';
+      form-action 'self';
+      upgrade-insecure-requests;
+    ">
+    -->
+  </head>
+
+  <body>
+    <!-- Authentication screen -->
+    <div class="auth-container" id="auth-container">
+      <div class="auth-logo">MikroChat</div>
+      <div class="auth-form" id="default-form">
+        <h2>Welcome Back!</h2>
+        <p id="auth-form-text"></p>
+
+        <div class="form-group" id="auth-form-email">
+          <label for="auth-email">Email</label>
+          <input type="email" id="auth-email">
+        </div>
+
+        <div class="form-group" id="auth-form-encryption">
+          <label for="encryption-password">Encryption Password</label>
+          <input type="password" id="encryption-password">
+          <small class="helper-text">This password will be used to encrypt/decrypt your data.</small>
+        </div>
+
+        <button class="btn" id="login-btn">Login</button>
+      </div>
+
+      <!-- Password screen (initially hidden) -->
+      <div class="auth-form" id="password-form" style="display: none;">
+        <h2>Enter Password</h2>
+        <p>Please enter your password to continue</p>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" placeholder="Your password">
+        </div>
+        <button class="btn" id="password-btn">Continue</button>
+        <div class="auth-back">
+          <a href="" id="back-to-email">← Back</a>
+        </div>
+      </div>
+
+      <!-- Magic link sent screen -->
+      <div class="auth-form" id="magic-link-sent-form" style="display: none;">
+        <h2>Check Your Email</h2>
+        <div id="magic-link-sent-message" class="magic-link-message"></div>
+        <div class="auth-back">
+          <a href="" id="back-to-email-from-magic">← Back</a>
+        </div>
+      </div>
+
+      <!-- Magic link encryption screen -->
+      <div class="auth-form" id="magic-link-form" style="display: none;">
+        <h2>Check Your Email</h2>
+        <div id="magic-link-encryption-message" class="magic-link-message"></div>
+      </div>
+
+    </div>
+
+    <!-- Application shell -->
+    <div class="app-container" id="app-container">
+      <div class="sidebar" id="sidebar">
+        <div class="server-name" id="server-name"><span class="server-name-text">MikroChat</span></div>
+        <div class="channels-header"><span>CHANNELS</span> <span class="add-channel" id="add-channel-btn">+</span></div>
+        <div class="channels-list" id="channels-list"></div>
+        <div class="theme-switch" id="theme-switch"><span class="theme-switch-icon">🌙</span> <span
+            class="theme-switch-label">Dark Mode</span></div>
+      </div>
+
+      <div class="main-content">
+        <div class="header">
+          <div class="menu-toggle" id="menu-toggle">☰</div>
+          <h2 id="current-channel-name">General</h2>
+          <div class="user-menu">
+            <div class="user-menu" id="user-menu">
+              <div class="user-avatar" id="user-avatar"></div>
+              <div class="user-name" id="user-name"></div>
+            </div>
+            <div class="user-dropdown" id="user-dropdown">
+              <div class="dropdown-item danger" id="exit-server-btn">Exit Server</div>
+              <div class="dropdown-item" id="logout-btn">Sign Out</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="messages-area" id="messages-area"></div>
+
+        <div class="input-area">
+          <div class="message-input-container">
+            <div class="pending-uploads-container" id="pending-uploads-container" style="display: none;">
+              <div class="pending-uploads" id="pending-uploads"></div>
+            </div>
+
+            <textarea class="message-input" id="message-input" placeholder="Type a message..."></textarea>
+            <div class="message-attachments">
+              <label for="image-upload" class="attach-image" title="Upload image">📷</label>
+              <input type="file" id="image-upload" accept="image/jpeg,image/png,image/webp" multiple
+                style="display:none">
+            </div><button class="send-button" id="send-button">→</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Create channel -->
+    <div class="modal-backdrop" id="create-channel-modal">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">Create Channel</div><button class="close-modal"
+            id="close-channel-modal">&times;</button>
+        </div>
+        <div class="form-group"><label for="channel-name">Channel Name</label> <input type="text" id="channel-name"
+            placeholder="Enter channel name"></div><button class="btn" id="create-channel-submit">Create
+          Channel</button>
+      </div>
+    </div>
+
+    <!-- Modal: Edit channel -->
+    <div class="modal-backdrop" id="edit-channel-modal">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">Edit Channel</div><button class="close-modal"
+            id="close-edit-channel-modal">&times;</button>
+        </div>
+        <div class="form-group"><label for="edit-channel-name">Channel Name</label> <input type="text"
+            id="edit-channel-name" placeholder="Enter new channel name"></div>
+        <div class="modal-actions"><button class="btn" id="update-channel-submit">Update Channel</button> <button
+            class="btn btn-danger" id="delete-channel-btn">Delete Channel</button></div>
+      </div>
+    </div>
+
+    <!-- Modal: Add reaction -->
+    <div class="modal-backdrop" id="reaction-picker-modal">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">Add Reaction</div><button class="close-modal"
+            id="close-reaction-modal">&times;</button>
+        </div>
+        <div class="reaction-picker" id="reaction-picker">
+          <div class="reaction-item" data-reaction="👍">👍</div>
+          <div class="reaction-item" data-reaction="👎">👎</div>
+          <div class="reaction-item" data-reaction="❤️">❤️</div>
+          <div class="reaction-item" data-reaction="🔥">🔥</div>
+          <div class="reaction-item" data-reaction="😂">😂</div>
+          <div class="reaction-item" data-reaction="😮">😮</div>
+          <div class="reaction-item" data-reaction="🎉">🎉</div>
+          <div class="reaction-item" data-reaction="👀">👀</div>
+          <div class="reaction-item" data-reaction="🙏">🙏</div>
+          <div class="reaction-item" data-reaction="👋">👋</div>
+          <div class="reaction-item" data-reaction="✅">✅</div>
+          <div class="reaction-item" data-reaction="⭐">⭐</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Edit message -->
+    <div class="modal-backdrop" id="edit-message-modal">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">Edit Message</div><button class="close-modal" id="close-edit-modal">&times;</button>
+        </div>
+        <div class="form-group"><textarea class="message-input" id="edit-message-input"
+            style="min-height:100px"></textarea></div><button class="btn" id="edit-message-submit">Save Changes</button>
+      </div>
+    </div>
+
+    <!-- Modal: Image preview -->
+    <div class="modal-backdrop" id="image-preview-modal">
+      <div class="modal image-preview-container"><button class="close-modal" id="close-image-preview">&times;</button>
+        <img id="preview-image" src="" alt="Image preview">
+      </div>
+    </div>
+
+    <!-- Modal: Server settings -->
+    <div class="modal-backdrop" id="server-settings-modal">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">Server Settings</div><button class="close-modal"
+            id="close-server-settings-modal">&times;</button>
+        </div>
+
+        <!-- Server name -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">Server Name</h3>
+          <div class="form-group"><input type="text" id="server-name-input" placeholder="Enter server name"></div>
+          <button class="btn" id="update-server-name-btn">Update Name</button>
+        </div>
+
+        <!-- User management -->
+        <div class="settings-section">
+          <h3 class="settings-section-title">Users</h3>
+          <div class="add-user-form">
+            <div class="form-group">
+              <label for="add-email-input">Add User by Email</label>
+              <input type="email" id="add-email-input" placeholder="Enter email address">
+            </div>
+            <div class="form-group">
+              <label>User Role</label>
+              <div class="role-selection">
+                <label class="role-option">
+                  <input type="radio" name="user-role" value="user" checked> User
+                </label>
+                <label class="role-option">
+                  <input type="radio" name="user-role" value="admin"> Admin
+                </label>
+              </div>
+            </div>
+            <button class="btn" id="add-user-btn">Add User</button>
+          </div>
+          <div class="users-list" id="users-list">
+            <!-- Users will appear here -->
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <noscript>
+      <div class="background">
+        <div class="message">
+          <div class="auth-logo">MikroChat</div>
+          MikroChat requires JavaScript to work.
+        </div>
+      </div>
+    </noscript>
+
+    <div class="toast" id="toast"></div>
+
+    <div class="loading" id="loading">
+      <div class="loading-spinner"></div>
+    </div>
+
+    <script src="mikrosafe.min.js" defer></script>
+    <script src="mikrochat.min.js" defer></script>
+
+    <script src="pwa.js" defer></script>
+    <script src="service-worker.js" defer></script>
+  </body>
+
+</html>

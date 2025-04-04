@@ -1,0 +1,1 @@
+closeChannelModal.addEventListener('click', closeCreateChannelModal);

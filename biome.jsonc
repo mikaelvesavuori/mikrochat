@@ -1,0 +1,78 @@
+{
+  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "vcs": { "enabled": false, "clientKind": "git", "useIgnoreFile": false },
+  "files": { "ignoreUnknown": false, "ignore": [] },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 80
+  },
+  "organizeImports": { "enabled": true },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "complexity": {
+        "noUselessThisAlias": "error",
+        "noUselessTypeConstraint": "error",
+        "useArrowFunction": "off"
+      },
+      "correctness": {
+        "noUnusedVariables": "error",
+        "useArrayLiterals": "off"
+      },
+      "style": {
+        "noNamespace": "error",
+        "useAsConstAssertion": "error",
+        "useBlockStatements": "off"
+      },
+      "suspicious": {
+        "noExplicitAny": "off",
+        "noExtraNonNullAssertion": "error",
+        "noMisleadingInstantiator": "error",
+        "noUnsafeDeclarationMerging": "error",
+        "useNamespaceKeyword": "error"
+      }
+    },
+    "ignore": ["node_modules/**"]
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "trailingCommas": "none",
+      "semicolons": "always"
+    }
+  },
+  "json": {
+    "formatter": {
+      "trailingCommas": "none"
+    }
+  },
+  "overrides": [
+    {
+      "include": ["*.js", "*.ts", "*.tsx", "*.mts", "*.cts", "*.mjs"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedVariables": "off" // This is for the frontend app: Variables become "global" when the codebase is split
+          },
+          "performance": {
+            "noDelete": "off"
+          },
+          "complexity": {
+            "noForEach": "off",
+            "noBannedTypes": "off"
+          },
+          "style": {
+            "noNonNullAssertion": "off"
+          },
+          "suspicious": {
+            "noPrototypeBuiltins": "off",
+            "noAssignInExpressions": "off"
+          }
+        }
+      }
+    }
+  ]
+}
