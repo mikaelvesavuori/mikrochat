@@ -21,6 +21,8 @@ mikrochat_db/
 uploads/
 *mikrochat.config.json
 
+releases/
+
 # Files generated from tests
 coverage/
 jest-coverage/

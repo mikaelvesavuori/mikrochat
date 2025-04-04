@@ -38,6 +38,7 @@
     "test:unit": "npx vitest run --coverage",
     "test:watch": "npx vitest --watch",
     "build": "npm run clean && npm run build:web && npm run build:api",
+    "build:release": "bash release.sh",
     "build:web": "rm -rf dist && mkdir dist && node build.mjs && npm run move:webapp:files",
     "build:api": "npm run build:esm && npm run build:cjs",
     "build:esm": "node esbuild.config.mjs --esm",
