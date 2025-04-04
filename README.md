@@ -16,6 +16,7 @@ MikroChat is a minimalistic, back-to-basics, and complete chat application for t
 - Emoji reactions included
 - Dark mode for the hackers
 - Channels for all your memes, projects, and "important discussions"
+- Client-side image resizing and compression
 - In-app notifications for unread messages in channels
 - "Dev mode" sign-in or full-on magic link authentication
   - Possible to configure whether or not users must be invited before signing in
