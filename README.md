@@ -1,6 +1,6 @@
 # MikroChat
 
-![Icon](./icons/icon-48x48.png)
+![Icon](./icons/icon-144x144.png)
 
 **The minimalist chat app that's all yours**.
 
