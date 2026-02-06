@@ -1,25 +1,44 @@
+import { state } from './state.mjs';
+import {
+  serverName,
+  serverNameInput,
+  serverSettingsModal,
+  serverNameText
+} from './dom.mjs';
+import { apiRequest } from './api.mjs';
+import { showToast, showLoading, hideLoading } from './ui.mjs';
+import { loadUsers } from './users.mjs';
+
 /**
  * @description Open the server settings modal.
  */
-function openServerSettingsModal() {
+export function openServerSettingsModal() {
   const updatedServerName = serverName.textContent.trim().replace(/\s+/g, ' ');
   serverNameInput.value = updatedServerName;
   serverSettingsModal.classList.add('active');
   serverNameInput.focus();
   loadUsers();
+
+  const webhooksSection = document.getElementById('webhooks-section');
+  if (state.currentUser?.isAdmin) {
+    if (webhooksSection) webhooksSection.style.display = 'block';
+    import('./webhooks.mjs').then(({ loadWebhooks }) => loadWebhooks());
+  } else {
+    if (webhooksSection) webhooksSection.style.display = 'none';
+  }
 }
 
 /**
  * @description Hide the server settings modal.
  */
-function hideServerSettingsModal() {
+export function hideServerSettingsModal() {
   serverSettingsModal.classList.remove('active');
 }
 
 /**
  * @description Update the server name.
  */
-async function updateServerName(name) {
+export async function updateServerName(name) {
   try {
     showLoading();
 
@@ -27,7 +46,7 @@ async function updateServerName(name) {
 
     serverNameText.textContent = name;
 
-    await storage.setItem('serverName', name);
+    await state.storage.setItem('serverName', name);
 
     hideServerSettingsModal();
     showToast('Server name updated successfully');
@@ -44,18 +63,18 @@ async function updateServerName(name) {
 /**
  * @description Get the server name.
  */
-async function loadServerName() {
+export async function loadServerName() {
   try {
     const response = await apiRequest('/server/settings', 'GET');
     if (response?.name) {
       serverNameText.textContent = response.name;
-      await storage.setItem('serverName', response.name);
+      await state.storage.setItem('serverName', response.name);
       return;
     }
   } catch (error) {
     console.error('Error loading server name from API:', error);
   }
 
-  const savedName = await storage.getItem('serverName');
+  const savedName = await state.storage.getItem('serverName');
   if (savedName) serverNameText.textContent = savedName;
 }

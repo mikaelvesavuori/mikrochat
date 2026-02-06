@@ -20,6 +20,7 @@ mikrochat_db/
 *.pem
 uploads/
 *mikrochat.config.json
+.claude/
 
 releases/
 

@@ -50,6 +50,16 @@
           <input type="email" id="auth-email">
         </div>
 
+        <div class="form-group" id="auth-form-password" style="display: none;">
+          <label for="auth-password">Password</label>
+          <input type="password" id="auth-password" placeholder="Your password">
+        </div>
+
+        <div class="form-group" id="auth-form-password-confirm" style="display: none;">
+          <label for="auth-password-confirm">Confirm Password</label>
+          <input type="password" id="auth-password-confirm" placeholder="Confirm your password">
+        </div>
+
         <div class="form-group" id="auth-form-encryption">
           <label for="encryption-password">Encryption Password</label>
           <input type="password" id="encryption-password">
@@ -57,6 +67,10 @@
         </div>
 
         <button class="btn" id="login-btn">Login</button>
+
+        <div class="auth-toggle" id="auth-toggle" style="display: none;">
+          <a href="#" id="auth-toggle-link"></a>
+        </div>
       </div>
 
       <!-- Password screen (initially hidden) -->
@@ -96,6 +110,8 @@
         <div class="server-name" id="server-name"><span class="server-name-text">MikroChat</span></div>
         <div class="channels-header"><span>CHANNELS</span> <span class="add-channel" id="add-channel-btn">+</span></div>
         <div class="channels-list" id="channels-list"></div>
+        <div class="dm-header"><span>DIRECT MESSAGES</span> <span class="start-dm" id="start-dm-btn">+</span></div>
+        <div class="dm-list" id="dm-list"></div>
         <div class="theme-switch" id="theme-switch"><span class="theme-switch-icon">🌙</span> <span
             class="theme-switch-label">Dark Mode</span></div>
       </div>
@@ -133,6 +149,9 @@
           </div>
         </div>
       </div>
+
+      <!-- Thread panel -->
+      <div class="thread-panel" id="thread-panel"></div>
     </div>
 
     <!-- Modal: Create channel -->
@@ -245,6 +264,36 @@
           </div>
         </div>
 
+        <!-- Webhook management -->
+        <div class="settings-section" id="webhooks-section" style="display:none">
+          <h3 class="settings-section-title">Webhooks</h3>
+          <div class="add-webhook-form">
+            <div class="form-group">
+              <label for="webhook-name-input">Bot Name</label>
+              <input type="text" id="webhook-name-input" placeholder="e.g. GitHub Bot">
+            </div>
+            <div class="form-group">
+              <label for="webhook-channel-select">Channel</label>
+              <select id="webhook-channel-select"></select>
+            </div>
+            <button class="btn" id="add-webhook-btn">Create Webhook</button>
+          </div>
+          <div class="webhooks-list" id="webhooks-list"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Modal: Start DM -->
+    <div class="modal-backdrop" id="start-dm-modal">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">Start Direct Message</div><button class="close-modal"
+            id="close-start-dm-modal">&times;</button>
+        </div>
+        <div class="dm-user-list" id="dm-user-list">
+          <!-- Users will appear here -->
+        </div>
       </div>
     </div>
 
@@ -256,6 +305,8 @@
         </div>
       </div>
     </noscript>
+
+    <div class="offline-bar" id="offline-bar">You are offline</div>
 
     <div class="toast" id="toast"></div>
 

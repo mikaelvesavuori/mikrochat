@@ -19,6 +19,7 @@ export const configDefaults = () => {
       refreshTokenExpirySeconds: 7 * 24 * 60 * 60, // 7 days
       maxActiveSessions: 3,
       appUrl: process.env.APP_URL || 'http://127.0.0.1:3000',
+      authMode: 'magic-link' as 'magic-link' | 'password',
       isInviteRequired: true,
       debug
     },

@@ -1,7 +1,13 @@
+import { state } from './state.mjs';
+import { previewImage, imagePreviewModal } from './dom.mjs';
+import { DEBUG_MODE } from './config.mjs';
+import { showToast, updatePendingUploadsUI } from './ui.mjs';
+import { getAccessToken } from './auth.mjs';
+
 /**
  * @description React to images being added to a message.
  */
-async function handleAddImages(files) {
+export async function handleAddImages(files) {
   for (const file of files) {
     if (!file.type.match('image.*')) {
       showToast('Only image files are supported', 'error');
@@ -11,7 +17,7 @@ async function handleAddImages(files) {
     try {
       const fileHash = await generateFileHash(file);
 
-      const isDuplicate = pendingUploads.some(
+      const isDuplicate = state.pendingUploads.some(
         (upload) => upload.fileHash === fileHash
       );
       if (isDuplicate) {
@@ -20,6 +26,7 @@ async function handleAddImages(files) {
       }
 
       const imageInfo = await resizeAndCompressImage(file);
+      const thumbnailBlob = await generateThumbnail(imageInfo.blob);
       const timestamp = Date.now();
       const extension = file.name.split('.').pop().toLowerCase();
       const fileName = `${timestamp}.${extension}`;
@@ -40,10 +47,11 @@ async function handleAddImages(files) {
         }
       }
 
-      pendingUploads.push({
+      state.pendingUploads.push({
         fileName,
         fileHash,
         blob: imageInfo.blob,
+        thumbnailBlob,
         preview: URL.createObjectURL(imageInfo.blob)
       });
 
@@ -58,10 +66,10 @@ async function handleAddImages(files) {
 /**
  * @description Remove an individual pending image upload from the queue.
  */
-function removePendingUpload(index) {
-  URL.revokeObjectURL(pendingUploads[index].preview);
+export function removePendingUpload(index) {
+  URL.revokeObjectURL(state.pendingUploads[index].preview);
 
-  pendingUploads.splice(index, 1);
+  state.pendingUploads.splice(index, 1);
 
   updatePendingUploadsUI();
 }
@@ -69,7 +77,7 @@ function removePendingUpload(index) {
 /**
  * @description Resize and compress image.
  */
-function resizeAndCompressImage(file) {
+export function resizeAndCompressImage(file) {
   return new Promise((resolve, reject) => {
     if (DEBUG_MODE)
       console.log(
@@ -202,9 +210,59 @@ function resizeAndCompressImage(file) {
 }
 
 /**
+ * @description Generate a small thumbnail from an image blob.
+ * Uses canvas to resize to max 200px and compress as JPEG at 0.6 quality.
+ */
+export function generateThumbnail(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+
+    img.onload = function () {
+      URL.revokeObjectURL(url);
+
+      let width = img.width;
+      let height = img.height;
+      const maxDimension = 200;
+
+      if (width > height && width > maxDimension) {
+        height = Math.round((height * maxDimension) / width);
+        width = maxDimension;
+      } else if (height > maxDimension) {
+        width = Math.round((width * maxDimension) / height);
+        height = maxDimension;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (thumbBlob) => {
+          if (thumbBlob) resolve(thumbBlob);
+          else reject(new Error('Failed to create thumbnail'));
+        },
+        'image/jpeg',
+        0.6
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load image for thumbnail'));
+    };
+
+    img.src = url;
+  });
+}
+
+/**
  * @description Utility function to format file size into more legible number.
  */
-function formatFileSize(bytes) {
+export function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} bytes`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(2)} KB`;
   return `${(bytes / 1048576).toFixed(2)} MB`;
@@ -213,7 +271,7 @@ function formatFileSize(bytes) {
 /**
  * @description Base64-encode an image from easy transmission to the backend.
  */
-function convertBlobToBase64(blob) {
+export function convertBlobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -230,7 +288,7 @@ function convertBlobToBase64(blob) {
  * @description Creates a file hash from the file contents.
  * Uses, for example, for deduplicating uploads.
  */
-async function generateFileHash(file) {
+export async function generateFileHash(file) {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -245,7 +303,7 @@ async function generateFileHash(file) {
 /**
  * @description Simple hash function for ArrayBuffers.
  */
-function hashSimple(arrayBuffer) {
+export function hashSimple(arrayBuffer) {
   const view = new DataView(arrayBuffer);
   let hash = 0;
   const step = Math.max(1, Math.floor(arrayBuffer.byteLength / 1000));
@@ -263,7 +321,7 @@ function hashSimple(arrayBuffer) {
 /**
  * @description Pop open the image preview for a clicked image.
  */
-async function openImagePreview(imageUrl) {
+export async function openImagePreview(imageUrl) {
   previewImage.src = ''; // Clear current image
   imagePreviewModal.classList.add('active');
 

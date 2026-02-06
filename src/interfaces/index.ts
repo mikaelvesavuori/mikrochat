@@ -3,6 +3,18 @@ import type { MikroChat } from '../MikroChat';
 
 type UnixTimestamp = number;
 
+export type PaginationOptions = {
+  limit?: number;
+  before?: string;
+};
+
+export type ThreadMeta = {
+  replyCount: number;
+  lastReplyAt: UnixTimestamp;
+  lastReplyBy: { id: string; userName: string };
+  participants: string[];
+};
+
 export type User = {
   id: string;
   userName: string;
@@ -10,6 +22,7 @@ export type User = {
   isAdmin: boolean;
   createdAt: UnixTimestamp;
   addedBy?: string;
+  passwordHash?: string;
 };
 
 export type Channel = {
@@ -26,12 +39,32 @@ export type Message = {
   author: {
     id: string;
     userName: string;
+    isBot?: boolean;
   };
   images?: string[];
   channelId: string;
   createdAt: UnixTimestamp;
   updatedAt?: UnixTimestamp;
   reactions: Record<string, string[]>;
+  threadId?: string;
+  threadMeta?: ThreadMeta;
+};
+
+export type Conversation = {
+  id: string;
+  participants: [string, string];
+  createdAt: UnixTimestamp;
+  updatedAt?: UnixTimestamp;
+  lastMessageAt?: UnixTimestamp;
+};
+
+export type Webhook = {
+  id: string;
+  name: string;
+  channelId: string;
+  token: string;
+  createdAt: UnixTimestamp;
+  createdBy: string;
 };
 
 export type ChatConfiguration = {
@@ -50,6 +83,7 @@ export type ServerSettings = {
   chat: MikroChat;
   devMode: boolean;
   isInviteRequired: boolean;
+  authMode: 'magic-link' | 'password';
 };
 
 export type ServerSentEvent =
@@ -82,11 +116,48 @@ export type ServerSentEvent =
   | {
       type: 'USER_EXIT';
       payload: { id: string; userName: string };
+    }
+  // Direct Messages / Conversations
+  | { type: 'NEW_CONVERSATION'; payload: Conversation }
+  | { type: 'NEW_DM_MESSAGE'; payload: Message & { participants: [string, string] } }
+  | { type: 'UPDATE_DM_MESSAGE'; payload: Message & { participants: [string, string] } }
+  | {
+      type: 'DELETE_DM_MESSAGE';
+      payload: { id: string; conversationId: string; participants: [string, string] };
+    }
+  // Threads
+  | {
+      type: 'NEW_THREAD_REPLY';
+      payload: {
+        parentMessageId: string;
+        channelId: string;
+        reply: Message;
+        threadMeta: ThreadMeta;
+      };
+    }
+  | { type: 'UPDATE_THREAD_REPLY'; payload: Message }
+  | {
+      type: 'DELETE_THREAD_REPLY';
+      payload: {
+        id: string;
+        threadId: string;
+        channelId: string;
+        threadMeta: ThreadMeta | null;
+      };
+    }
+  // Webhooks
+  | {
+      type: 'NEW_WEBHOOK';
+      payload: { id: string; name: string; channelId: string };
+    }
+  | {
+      type: 'DELETE_WEBHOOK';
+      payload: { id: string; channelId: string };
     };
 
 export interface DatabaseOperations {
   get<T>(key: string): Promise<T | null>;
-  set<T>(key: string, value: T): Promise<void>;
+  set<T>(key: string, value: T, expirySeconds?: number): Promise<void>;
   delete(key: string): Promise<void>;
   list<T>(prefix: string): Promise<T[]>;
 }
@@ -111,7 +182,7 @@ export interface StorageProvider {
   listChannels(): Promise<Channel[]>;
 
   getMessageById(id: string): Promise<Message | null>;
-  listMessagesByChannel(channelId: string): Promise<Message[]>;
+  listMessagesByChannel(channelId: string, options?: PaginationOptions): Promise<Message[]>;
   createMessage(message: Message): Promise<void>;
   updateMessage(message: Message): Promise<void>;
   deleteMessage(id: string): Promise<void>;
@@ -125,6 +196,25 @@ export interface StorageProvider {
 
   getServerSettings(): Promise<{ name: string } | null>;
   updateServerSettings(settings: { name: string }): Promise<void>;
+
+  getConversationById(id: string): Promise<Conversation | null>;
+  getConversationByParticipants(
+    userId1: string,
+    userId2: string
+  ): Promise<Conversation | null>;
+  createConversation(conversation: Conversation): Promise<void>;
+  updateConversation(conversation: Conversation): Promise<void>;
+  listConversationsForUser(userId: string): Promise<Conversation[]>;
+  listMessagesByConversation(conversationId: string, options?: PaginationOptions): Promise<Message[]>;
+
+  listMessagesByThread(threadId: string, options?: PaginationOptions): Promise<Message[]>;
+
+  getWebhookById(id: string): Promise<Webhook | null>;
+  getWebhookByToken(token: string): Promise<Webhook | null>;
+  listWebhooks(): Promise<Webhook[]>;
+  listWebhooksByChannel(channelId: string): Promise<Webhook[]>;
+  createWebhook(webhook: Webhook): Promise<void>;
+  deleteWebhook(id: string): Promise<void>;
 }
 
 export type ConfigurationOptions = {
@@ -191,6 +281,12 @@ export type AuthConfiguration = {
    * the email address already exist (be invited)?
    */
   isInviteRequired: boolean;
+  /**
+   * Authentication mode for production use.
+   * 'magic-link' sends a one-time login link via email.
+   * 'password' uses traditional email + password credentials.
+   */
+  authMode: 'magic-link' | 'password';
   /**
    * Use debug mode?
    */

@@ -1,10 +1,17 @@
+import { state } from './state.mjs';
+import {
+  DEBUG_MODE,
+  DEFAULT_PASSWORD,
+  ENABLE_USER_SPECIFIC_ENCRYPTION
+} from './config.mjs';
+
 // Storage-specific globals
 const INIT_KEY = '_storage_initialized_';
 
 /**
  * @description Set up storage depending on server settings.
  */
-async function initializeStorage(password) {
+export async function initializeStorage(password) {
   const fixedPassword = password || DEFAULT_PASSWORD;
 
   if (DEBUG_MODE)
@@ -24,7 +31,7 @@ async function initializeStorage(password) {
     if (hasExistingData) {
       try {
         await setupStorage(fixedPassword, false);
-        const result = await storage.getItem(INIT_KEY);
+        const result = await state.storage.getItem(INIT_KEY);
 
         return result === 'true';
       } catch (error) {
@@ -39,7 +46,7 @@ async function initializeStorage(password) {
       if (DEBUG_MODE)
         console.log('Setting up custom encryption...', fixedPassword);
       await setupStorage(fixedPassword, true);
-      await storage.setItem(INIT_KEY, 'true');
+      await state.storage.setItem(INIT_KEY, 'true');
 
       return true;
     }
@@ -54,17 +61,17 @@ async function initializeStorage(password) {
  * @description Set up storage using MikroSafe.
  * @see https://github.com/mikaelvesavuori/mikrosafe
  */
-async function setupStorage(password, setInitItem = true) {
+export async function setupStorage(password, setInitItem = true) {
   const mikrosafe = await new MikroSafe(password);
-  storage = mikrosafe;
-  isStorageInitialized = true;
-  if (setInitItem) await storage.setItem(INIT_KEY, 'true');
+  state.storage = mikrosafe;
+  state.isStorageInitialized = true;
+  if (setInitItem) await state.storage.setItem(INIT_KEY, 'true');
 }
 
 /**
  * @description Checks if the user already seems to have existing data from previous use.
  */
-function checkForExistingData() {
+export function checkForExistingData() {
   const storageKeys = Object.keys(localStorage);
   const hasInitKey = storageKeys.includes(INIT_KEY);
   const hasTokenOrAccessToken =
@@ -77,12 +84,12 @@ function checkForExistingData() {
  * @description Checks if the password matches the expected encryption password
  * This is done by seeing if the initialization key can be properly read back.
  */
-async function verifyEncryptionPassword(password) {
+export async function verifyEncryptionPassword(password) {
   try {
     const storageInitialized = await initializeStorage(password);
     if (!storageInitialized) return false;
 
-    const isVerified = await storage.getItem(INIT_KEY);
+    const isVerified = await state.storage.getItem(INIT_KEY);
     return isVerified === 'true';
   } catch (error) {
     console.error('Error verifying encryption password:', error);

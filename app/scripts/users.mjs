@@ -1,15 +1,21 @@
+import { state } from './state.mjs';
+import { usersList } from './dom.mjs';
+import { apiRequest } from './api.mjs';
+import { showToast, showLoading, hideLoading } from './ui.mjs';
+import { getInitials, formatTime } from './utils.mjs';
+
 /**
  * @description Get all users on the server.
  */
-async function loadUsers() {
+export async function loadUsers() {
   try {
     const response = await apiRequest('/users', 'GET');
     usersList.innerHTML = '';
 
     if (response.users && response.users.length > 0) {
       const sortedUsers = [...response.users].sort((a, b) => {
-        if (a.id === currentUser.id) return -1;
-        if (b.id === currentUser.id) return 1;
+        if (a.id === state.currentUser.id) return -1;
+        if (b.id === state.currentUser.id) return 1;
         return 0;
       });
 
@@ -26,7 +32,7 @@ async function loadUsers() {
             <div class="user-created">Added ${formatTime(new Date(user.createdAt))}</div>
           </div>
           ${
-            user.id !== currentUser.id
+            user.id !== state.currentUser.id
               ? `
             <div class="user-actions">
               <button class="remove-user" title="Remove User">✕</button>
@@ -57,7 +63,7 @@ async function loadUsers() {
 /**
  * @description Add a user to the server.
  */
-async function addUser(email, role) {
+export async function addUser(email, role) {
   try {
     showLoading();
     const response = await apiRequest('/users/add', 'POST', { email, role });
@@ -76,7 +82,7 @@ async function addUser(email, role) {
 /**
  * @description Remove a user from the server.
  */
-async function removeUser(userId, email) {
+export async function removeUser(userId, email) {
   if (confirm(`Are you sure you want to remove user ${email}?`)) {
     try {
       showLoading();

@@ -1,7 +1,9 @@
+import { state } from './state.mjs';
+
 /**
  * @description Get the user's initials.
  */
-function getInitials(name) {
+export function getInitials(name) {
   if (!name) return '?';
   return name
     .split(' ')
@@ -13,7 +15,7 @@ function getInitials(name) {
 /**
  * @description Formats a Unix timestamp as a locale-adjusted date string.
  */
-function formatDate(timestamp) {
+export function formatDate(timestamp) {
   const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
   return date.toLocaleDateString();
 }
@@ -21,7 +23,7 @@ function formatDate(timestamp) {
 /**
  * @description Formats a Unix timestamp as a locale-adjusted time string.
  */
-function formatTime(timestamp) {
+export function formatTime(timestamp) {
   const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -29,7 +31,7 @@ function formatTime(timestamp) {
 /**
  * @description Validates if a string is a valid email address.
  */
-function isValidEmail(email) {
+export function isValidEmail(email) {
   // Check if email is provided and is a string
   if (!email || typeof email !== 'string') return false;
 
@@ -79,7 +81,7 @@ function isValidEmail(email) {
 /**
  * @description Sanitizes user input but preserves Markdown syntax.
  */
-function sanitizeInput(input) {
+export function sanitizeInput(input) {
   if (typeof input !== 'string') {
     return '';
   }
@@ -95,7 +97,7 @@ function sanitizeInput(input) {
 /**
  * @description Parses Markdown syntax in the content.
  */
-function parseMarkdown(content) {
+export function parseMarkdown(content) {
   if (!content) return '';
 
   let updatedContent = content;
@@ -160,7 +162,7 @@ function parseMarkdown(content) {
 /**
  * @description Get the message with the provided ID from the DOM, if it exists.
  */
-function findMessageWithId(messageId) {
+export function findMessageWithId(messageId) {
   const messages = Array.from(document.querySelectorAll('.message'));
   return messages.find((el) => el.dataset.id === messageId);
 }
@@ -168,12 +170,38 @@ function findMessageWithId(messageId) {
 /**
  * @description Checks if a given message has received a specific emoji reaction from the user.
  */
-function hasUserReactedWithEmoji(messageId, reaction) {
+export function hasUserReactedWithEmoji(messageId, reaction) {
   const reactionsContainer = getReactionsContainer(messageId);
+  if (!reactionsContainer) return false;
 
   const userReactions = Array.from(
     reactionsContainer.querySelectorAll('.user-reacted')
   ).map((reaction) => reaction.dataset.reaction);
 
   return userReactions.some((r) => r === reaction);
+}
+
+/**
+ * @description Get the container holding the reactions for a message.
+ */
+export function getReactionsContainer(messageId) {
+  let targetElement = null;
+
+  targetElement = findMessageWithId(messageId);
+
+  if (!targetElement) {
+    for (const [tempId, realId] of state.tempIdMap.entries()) {
+      if (realId === messageId) {
+        targetElement = findMessageWithId(tempId);
+        if (targetElement) break;
+      }
+    }
+  }
+
+  if (!targetElement) return null;
+
+  const reactionsContainer = targetElement.querySelector('.message-reactions');
+  if (!reactionsContainer) return null;
+
+  return reactionsContainer;
 }

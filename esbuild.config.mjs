@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { build } from 'esbuild';
 
 const format = (process.argv[2] || 'all').replace('--', '');
-const isSingleFormat = format !== 'all';
 const outputFileName = 'mikrochat.bundled';
 
 const getPackageVersion = () =>
@@ -14,11 +13,11 @@ console.log(`Building MikroChat (${packageVersion}) for format "${format}"...`);
 const getConfig = () => {
   return {
     entryPoints: ['src/index.ts'],
-    bundle: isSingleFormat,
-    minify: isSingleFormat,
-    treeShaking: isSingleFormat,
+    bundle: true,
+    minify: true,
+    treeShaking: true,
     platform: 'node',
-    target: 'node22',
+    target: 'node24',
     mainFields: ['module', 'main'],
     banner: {
       js: '// MikroChat - See LICENSE file for copyright and license details.'

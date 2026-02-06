@@ -1,7 +1,14 @@
+import { state } from './state.mjs';
+import { AUTH_MODE, API_BASE_URL } from './config.mjs';
+import { showToast } from './ui.mjs';
+import { getAccessToken, isTokenExpired, refreshTokens } from './auth.mjs';
+import { showAuthScreen } from './ui.mjs';
+import { handleOfflineMessageCreation, removeImageFromMessage } from './messages.mjs';
+
 /**
  * @description Helper function to make API requests to the MikroChat backend.
  */
-async function apiRequest(
+export async function apiRequest(
   endpoint,
   method = 'GET',
   data = null,
@@ -31,13 +38,13 @@ async function apiRequest(
       if (await isTokenExpired()) {
         await refreshTokens();
         const newToken = await getAccessToken();
-        if (newToken) await storage.setItem('accessToken', newToken);
+        if (newToken) await state.storage.setItem('accessToken', newToken);
       }
     } catch (error) {
       console.error('Token refresh failed:', error);
 
-      await storage.removeItem('accessToken');
-      currentUser = null;
+      await state.storage.removeItem('accessToken');
+      state.currentUser = null;
       await showAuthScreen();
 
       showToast('Session expired. Please log in again.', 'error');
@@ -51,7 +58,8 @@ async function apiRequest(
 
   let token = tokenOverride;
 
-  if (isStorageInitialized) token = tokenOverride || (await getAccessToken());
+  if (state.isStorageInitialized)
+    token = tokenOverride || (await getAccessToken());
 
   if (token) headers.Authorization = `Bearer ${token}`;
 
@@ -139,10 +147,20 @@ async function apiRequest(
  * @description Gets images from the backend. The content is binary,
  * so we will append it as a blob to their respective image DOM elements.
  */
-async function fetchImageWithAuth(imageUrl, containerId, messageId, filename) {
+export async function fetchImageWithAuth(
+  imageUrl,
+  containerId,
+  messageId,
+  filename,
+  useThumbnail = true
+) {
   const token = await getAccessToken();
+  const fetchUrl = useThumbnail
+    ? `${imageUrl}${imageUrl.includes('?') ? '&' : '?'}size=thumb`
+    : imageUrl;
+  const fullImageUrl = imageUrl; // Always use full URL for preview
 
-  await fetch(imageUrl, {
+  await fetch(fetchUrl, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${token}`
@@ -165,12 +183,13 @@ async function fetchImageWithAuth(imageUrl, containerId, messageId, filename) {
         img.src = objectUrl;
         img.alt = 'User uploaded image';
         img.className = 'message-image';
-        img.setAttribute('onclick', `openImagePreview('${imageUrl}')`);
+        img.loading = 'lazy';
+        img.setAttribute('onclick', `openImagePreview('${fullImageUrl}')`);
         imgWrapper.appendChild(img);
 
-        const message = messageCache.get(messageId);
+        const message = state.messageCache.get(messageId);
         const isAuthor =
-          message?.author && message.author.id === currentUser.id;
+          message?.author && message.author.id === state.currentUser.id;
 
         if (isAuthor) {
           const removeBtn = document.createElement('div');

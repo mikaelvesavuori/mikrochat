@@ -46,6 +46,11 @@ export const mikrochatOptions = {
       defaultValue: defaults.auth.appUrl
     },
     {
+      flag: '--authMode',
+      path: 'auth.authMode',
+      defaultValue: defaults.auth.authMode
+    },
+    {
       flag: '--isInviteRequired',
       path: 'auth.isInviteRequired',
       isFlag: true,
@@ -81,7 +86,7 @@ export const mikrochatOptions = {
     {
       flag: '--emailPort',
       path: 'email.port',
-      defaultValue: defaults.email.host
+      defaultValue: defaults.email.port
     },
     {
       flag: '--emailSecure',

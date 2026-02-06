@@ -1,7 +1,20 @@
+import { state } from './state.mjs';
+import { reactionPickerModal } from './dom.mjs';
+import { apiRequest } from './api.mjs';
+import {
+  showToast,
+  getReactionCount,
+  updateReactionCount,
+  reacted,
+  renderReaction
+} from './ui.mjs';
+import { hasUserReactedWithEmoji, findMessageWithId } from './utils.mjs';
+import { getActualMessageId } from './messages.mjs';
+
 /**
  * @description Process and group reactions into a ready-to-use format.
  */
-function processReactions(reactions) {
+export function processReactions(reactions) {
   const reactionsByEmoji = {};
 
   if (!reactions) return reactionsByEmoji;
@@ -21,7 +34,7 @@ function processReactions(reactions) {
 /**
  * @description User interaction leading to adding a reaction (emoji) to a message.
  */
-async function addReaction(messageId, reaction) {
+export async function addReaction(messageId, reaction) {
   const actualId = getActualMessageId(messageId);
   if (!actualId) {
     showToast('Invalid message ID', 'error');
@@ -32,16 +45,16 @@ async function addReaction(messageId, reaction) {
   if (hasUserReactedWithEmoji(messageId, reaction)) return;
 
   try {
-    if (messageCache.has(messageId)) {
-      const cachedMessage = messageCache.get(messageId);
+    if (state.messageCache.has(messageId)) {
+      const cachedMessage = state.messageCache.get(messageId);
       if (!cachedMessage.reactions) cachedMessage.reactions = {};
 
       if (!cachedMessage.reactions[reaction])
-        cachedMessage.reactions[reaction] = [currentUser.id];
-      else if (!cachedMessage.reactions[reaction].includes(currentUser.id))
-        cachedMessage.reactions[reaction].push(currentUser.id);
+        cachedMessage.reactions[reaction] = [state.currentUser.id];
+      else if (!cachedMessage.reactions[reaction].includes(state.currentUser.id))
+        cachedMessage.reactions[reaction].push(state.currentUser.id);
 
-      messageCache.set(messageId, cachedMessage);
+      state.messageCache.set(messageId, cachedMessage);
     }
 
     await apiRequest(`/messages/${actualId}/reactions`, 'POST', {
@@ -60,7 +73,7 @@ async function addReaction(messageId, reaction) {
 /**
  * @description User interaction leading to removing a reaction (emoji) to a message.
  */
-async function removeReaction(messageId, reaction) {
+export async function removeReaction(messageId, reaction) {
   const actualId = getActualMessageId(messageId);
   if (!actualId) {
     showToast('Invalid message ID', 'error');
@@ -82,13 +95,14 @@ async function removeReaction(messageId, reaction) {
 /**
  * @description Update the UI state for a reaction.
  */
-async function updateReactionInUI(
+export async function updateReactionInUI(
   messageId,
   reaction,
   isAdding,
   isEffectOfOtherUserInteraction = false
 ) {
-  const reactionsContainer = getReactionsContainer(messageId);
+  const reactionsContainer = getReactionsContainerLocal(messageId);
+  if (!reactionsContainer) return;
 
   const existingReaction = reactionsContainer.querySelector(
     `.reaction[data-reaction="${reaction}"]`
@@ -134,14 +148,15 @@ async function updateReactionInUI(
 
 /**
  * @description Get the container holding the reactions for a message.
+ * Note: This is duplicated from utils.mjs to avoid circular dependency.
  */
-function getReactionsContainer(messageId) {
+function getReactionsContainerLocal(messageId) {
   let targetElement = null;
 
   targetElement = findMessageWithId(messageId);
 
   if (!targetElement) {
-    for (const [tempId, realId] of tempIdMap.entries()) {
+    for (const [tempId, realId] of state.tempIdMap.entries()) {
       if (realId === messageId) {
         targetElement = findMessageWithId(tempId);
         if (targetElement) break;

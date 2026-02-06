@@ -1,17 +1,17 @@
 import {
-  MikroDBProvider as AuthStorageProvider,
+  PikoDBProvider as AuthStorageProvider,
   MikroAuth,
   MikroMailProvider
 } from 'mikroauth';
 import { MikroConf } from 'mikroconf';
-import { MikroDB } from 'mikrodb';
+import { PikoDB } from 'pikodb';
 
 import type { CombinedConfiguration } from './interfaces';
 
 import { MikroChat } from './MikroChat';
 import { startServer } from './Server.js';
 
-import { MikroDBProvider as ChatStorageProvider } from './providers/MikroDBProvider';
+import { PikoDBProvider as ChatStorageProvider } from './providers/PikoDBProvider';
 
 import { mikrochatOptions } from './config/mikrochatOptions';
 
@@ -22,10 +22,13 @@ import { mikrochatOptions } from './config/mikrochatOptions';
 async function start() {
   const config = getConfig() as CombinedConfiguration;
 
-  const db = new MikroDB(config.storage);
+  const db = new PikoDB(config.storage);
   await db.start();
   const authStorageProvider = new AuthStorageProvider(db);
-  const chatStorageProvider = new ChatStorageProvider(db);
+  const chatStorageProvider = new ChatStorageProvider(
+    db,
+    config.storage.encryptionKey || undefined
+  );
   const emailProvider = new MikroMailProvider(config.email);
 
   const auth = new MikroAuth(config, emailProvider, authStorageProvider);
@@ -36,7 +39,8 @@ async function start() {
     auth,
     chat,
     devMode: config.devMode,
-    isInviteRequired: config.auth.isInviteRequired
+    isInviteRequired: config.auth.isInviteRequired,
+    authMode: config.auth.authMode || 'magic-link'
   });
 }
 

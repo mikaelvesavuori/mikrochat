@@ -1,7 +1,7 @@
 {
   "name": "mikrochat",
   "description": "The minimalist chat app that's all yours",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "author": "Mikael Vesavuori",
   "license": "MIT",
   "keywords": [
@@ -51,9 +51,9 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@biomejs/biome": "1",
+    "@biomejs/biome": "2",
     "@types/node": "latest",
-    "@vitest/coverage-v8": "2",
+    "@vitest/coverage-v8": "4",
     "esbuild": "latest",
     "html-minifier-terser": "7",
     "http-server": "14",
@@ -62,11 +62,12 @@
     "tsup": "8",
     "tsx": "4",
     "typescript": "5",
-    "vitest": "2"
+    "vitest": "4"
   },
   "dependencies": {
     "mikroauth": "latest",
     "mikroconf": "latest",
+    "pikodb": "latest",
     "mikroid": "latest",
     "mikroserve": "latest"
   }

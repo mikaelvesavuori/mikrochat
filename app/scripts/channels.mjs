@@ -1,7 +1,14 @@
+import { state } from './state.mjs';
+import { channelsList, currentChannelName } from './dom.mjs';
+import { apiRequest } from './api.mjs';
+import { showToast, renderChannelItem, updateDocumentTitle } from './ui.mjs';
+import { loadMessagesForChannel } from './messages.mjs';
+import { setupMessageEvents } from './events.mjs';
+
 /**
  * @description Load data for all channels on the server.
  */
-async function loadChannels() {
+export async function loadChannels() {
   try {
     const { channels } = await apiRequest('/channels');
 
@@ -9,8 +16,8 @@ async function loadChannels() {
 
     for (const channel of channels) await renderChannelItem(channel);
 
-    if (channels.length > 0 && !currentChannelId) {
-      const savedChannelId = await storage.getItem('currentChannelId');
+    if (channels.length > 0 && !state.currentChannelId) {
+      const savedChannelId = await state.storage.getItem('currentChannelId');
       const channelToSelect =
         channels.find((c) => c.id === savedChannelId) || channels[0];
       await selectChannel(channelToSelect.id, channelToSelect.name);
@@ -25,15 +32,24 @@ async function loadChannels() {
 /**
  * @description Navigate to a given channel.
  */
-async function selectChannel(channelId, channelName) {
-  if (channelId === currentChannelId) return;
+export async function selectChannel(channelId, channelName) {
+  if (channelId === state.currentChannelId && state.viewMode === 'channel') return;
 
-  currentChannelId = channelId;
+  // Clear DM selection
+  state.currentConversationId = null;
+  state.viewMode = 'channel';
+  document.querySelectorAll('.dm-item').forEach((el) => el.classList.remove('active'));
+
+  // Restore # prefix for channels
+  currentChannelName.style.removeProperty('--channel-prefix');
+
+  state.currentChannelId = channelId;
   currentChannelName.textContent = channelName;
-  await storage.setItem('currentChannelId', channelId);
+  await state.storage.setItem('currentChannelId', channelId);
 
   // Reset unread count for this channel
-  unreadCounts.set(channelId, 0);
+  state.unreadCounts.set(channelId, 0);
+  updateDocumentTitle();
 
   const channels = channelsList.querySelectorAll('.channel-item');
   for (const channel of channels) {
@@ -43,7 +59,7 @@ async function selectChannel(channelId, channelName) {
       // Update the channel item to remove notification badge
       const channelObj = { id: channelId, name: channelName };
       if (channel.querySelector('.channel-settings'))
-        channelObj.createdBy = currentUser.id;
+        channelObj.createdBy = state.currentUser.id;
 
       await renderChannelItem(channelObj);
     } else {
@@ -59,7 +75,7 @@ async function selectChannel(channelId, channelName) {
 /**
  * @description Create a channel and then directly navigate to it.
  */
-async function createChannel(name) {
+export async function createChannel(name) {
   try {
     const { channel } = await apiRequest('/channels', 'POST', { name });
     showToast(`Channel #${name} created successfully!`);
@@ -74,7 +90,7 @@ async function createChannel(name) {
 /**
  * @description Delete a channel and then navigate directly to the first ("General") channel.
  */
-async function deleteChannel(channelId) {
+export async function deleteChannel(channelId) {
   try {
     await apiRequest(`/channels/${channelId}`, 'DELETE');
     showToast('Channel deleted successfully');
@@ -89,7 +105,7 @@ async function deleteChannel(channelId) {
 /**
  * @description Update the name of a channel.
  */
-async function updateChannelName(channelId, name) {
+export async function updateChannelName(channelId, name) {
   try {
     const { channel } = await apiRequest(`/channels/${channelId}`, 'PUT', {
       name
@@ -97,7 +113,8 @@ async function updateChannelName(channelId, name) {
     showToast(`Channel renamed to #${name} successfully`);
 
     // Update current channel name if we're viewing the updated channel
-    if (currentChannelId === channelId) currentChannelName.textContent = name;
+    if (state.currentChannelId === channelId)
+      currentChannelName.textContent = name;
 
     await loadChannels();
 
@@ -111,8 +128,8 @@ async function updateChannelName(channelId, name) {
 /**
  * @description Navigate to the last used channel.
  */
-async function restoreLastChannel() {
-  const savedChannelId = await storage.getItem('currentChannelId');
+export async function restoreLastChannel() {
+  const savedChannelId = await state.storage.getItem('currentChannelId');
   if (!savedChannelId) return;
 
   const channelEl = document.querySelector(

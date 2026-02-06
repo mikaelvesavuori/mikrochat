@@ -213,6 +213,21 @@ noscript div.message {
   text-decoration: underline;
 }
 
+.auth-toggle {
+  margin-top: 1.25rem;
+  text-align: center;
+}
+
+.auth-toggle a {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-size: var(--font-size-s);
+}
+
+.auth-toggle a:hover {
+  text-decoration: underline;
+}
+
 .helper-text {
   color: var(--color-gray);
   font-size: var(--font-size-xs);
@@ -251,7 +266,7 @@ noscript div.message {
 }
 
 .header h2:before {
-  content: "#";
+  content: var(--channel-prefix, "#");
   color: var(--color-primary);
 }
 
@@ -438,6 +453,119 @@ h2#current-channel-name {
   padding: 0 var(--space-xs);
   font-size: var(--font-size-xs);
   display: flex;
+}
+
+/* Direct Messages Navigation */
+.dm-header {
+  color: var(--color-gray);
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-s);
+  padding: var(--space-l);
+  font-size: var(--font-size-s);
+  display: flex;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.start-dm {
+  cursor: pointer;
+  color: var(--color-gray);
+  transition: var(--transition);
+  font-size: var(--icon-size-m);
+}
+
+.start-dm:hover {
+  color: var(--color-primary);
+}
+
+.dm-list {
+  flex: 1;
+  padding: 0 var(--space-s);
+  overflow-y: auto;
+  max-height: 12rem;
+}
+
+.dm-item {
+  cursor: pointer;
+  transition: var(--transition);
+  color: var(--color-gray);
+  border-radius: var(--radius-s);
+  align-items: center;
+  margin-bottom: var(--space-xxs);
+  padding: 0.5rem var(--space-s);
+  display: flex;
+  gap: var(--space-s);
+}
+
+.dm-item:hover {
+  background-color: var(--hover-bg);
+  color: var(--text);
+}
+
+.dm-item.active {
+  background-color: var(--active-bg);
+  color: var(--color-primary);
+}
+
+.dm-avatar {
+  background-color: var(--color-primary);
+  color: var(--white);
+  border-radius: var(--radius-circle);
+  justify-content: center;
+  align-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  display: flex;
+  flex-shrink: 0;
+}
+
+.dm-name {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  flex: 1;
+}
+
+.dm-user-list {
+  max-height: 15rem;
+  overflow-y: auto;
+}
+
+.dm-user-item {
+  cursor: pointer;
+  transition: var(--transition);
+  border-radius: var(--radius-s);
+  align-items: center;
+  margin-bottom: var(--space-xs);
+  padding: var(--space-m);
+  display: flex;
+  gap: var(--space-m);
+}
+
+.dm-user-item:hover {
+  background-color: var(--hover-bg);
+}
+
+.dm-user-item .user-avatar {
+  width: var(--avatar-size-s);
+  height: var(--avatar-size-s);
+}
+
+.dm-user-item .user-info {
+  flex: 1;
+}
+
+.dm-user-item .user-name {
+  font-weight: var(--font-weight-semibold);
+}
+
+.dm-user-item .user-email {
+  color: var(--color-gray);
+  font-size: var(--font-size-xs);
 }
 
 /* Message Area */
@@ -1076,6 +1204,26 @@ input[type="password"]:focus {
   z-index: 1000;
 }
 
+/* Offline Bar */
+.offline-bar {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background-color: var(--color-danger);
+  color: var(--white);
+  text-align: center;
+  padding: var(--space-xs) var(--space-m);
+  font-size: var(--font-size-small);
+  font-weight: 600;
+  z-index: 1001;
+}
+
+.offline-bar.visible {
+  display: block;
+}
+
 /* Loading Indicator */
 .loading {
   z-index: 1000;
@@ -1311,4 +1459,240 @@ input[type="password"]:focus {
     margin-left: 1rem;
     margin-right: 1rem;
   }
+}
+
+/* Thread Panel */
+.thread-panel {
+  display: none;
+  width: 400px;
+  max-width: 100%;
+  border-left: var(--border-width) solid var(--border-color);
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-primary);
+  flex-shrink: 0;
+}
+
+.thread-panel.active {
+  display: flex;
+}
+
+.thread-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-l);
+  border-bottom: var(--border-width) solid var(--border-color);
+}
+
+.thread-title {
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-l);
+}
+
+.close-thread {
+  background: none;
+  border: none;
+  font-size: 1.5em;
+  cursor: pointer;
+  color: var(--color-gray);
+  transition: var(--transition);
+}
+
+.close-thread:hover {
+  color: var(--color-primary);
+}
+
+.thread-parent {
+  padding: var(--space-m) var(--space-l);
+  border-bottom: var(--border-width) solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.thread-parent-message {
+  margin: 0;
+  padding: 0;
+}
+
+.thread-divider {
+  padding: var(--space-s) var(--space-l);
+  font-size: var(--font-size-s);
+  color: var(--color-gray);
+  border-bottom: var(--border-width) solid var(--border-color);
+  font-weight: var(--font-weight-semibold);
+}
+
+.thread-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-s) 0;
+}
+
+.thread-messages .message {
+  padding: var(--space-s) var(--space-l);
+}
+
+.thread-messages .empty-state {
+  padding: var(--space-xl);
+  text-align: center;
+  color: var(--color-gray);
+}
+
+.thread-input-area {
+  display: flex;
+  gap: var(--space-s);
+  padding: var(--space-m) var(--space-l);
+  border-top: var(--border-width) solid var(--border-color);
+  align-items: flex-end;
+}
+
+.thread-input-area .message-input {
+  flex: 1;
+  min-height: 40px;
+  max-height: 120px;
+}
+
+/* Thread badge on parent messages */
+.thread-badge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-s);
+  padding: var(--space-xs) var(--space-s);
+  margin-top: var(--space-xs);
+  cursor: pointer;
+  color: var(--color-primary);
+  font-size: var(--font-size-s);
+  border-radius: var(--border-radius);
+  transition: var(--transition);
+}
+
+.thread-badge:hover {
+  background: var(--bg-secondary);
+}
+
+.thread-badge-count {
+  font-weight: var(--font-weight-bold);
+}
+
+.thread-badge-last {
+  color: var(--color-gray);
+}
+
+/* Start thread / Reply button in message actions */
+.start-thread {
+  cursor: pointer;
+  font-size: var(--font-size-s);
+  color: var(--color-gray);
+  transition: var(--transition);
+}
+
+.start-thread:hover {
+  color: var(--color-primary);
+}
+
+/* Mobile: thread panel takes full width */
+@media (width <= 768px) {
+  .thread-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    z-index: 100;
+  }
+}
+
+/* Bot badge */
+.bot-badge {
+  display: inline-block;
+  background-color: var(--color-primary);
+  color: var(--white);
+  font-size: 0.6rem;
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-s);
+  margin-left: var(--space-s);
+  vertical-align: middle;
+}
+
+/* Webhook management */
+.webhook-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-m);
+  border-bottom: var(--border-width) solid var(--border-color);
+}
+
+.webhook-info {
+  flex: 1;
+}
+
+.webhook-name {
+  font-weight: var(--font-weight-bold);
+  color: var(--text);
+}
+
+.webhook-channel {
+  font-size: var(--font-size-s);
+  color: var(--color-gray);
+  margin-top: 0.15rem;
+}
+
+.webhook-actions .remove-webhook {
+  background: none;
+  border: none;
+  color: var(--color-danger);
+  cursor: pointer;
+  font-size: var(--font-size-l);
+  padding: var(--space-s);
+}
+
+.webhook-token-display {
+  background-color: var(--bg-secondary);
+  border: var(--border-width) solid var(--color-primary);
+  border-radius: var(--radius);
+  padding: var(--space-m);
+  margin-bottom: var(--space-m);
+}
+
+.webhook-token-label {
+  font-size: var(--font-size-s);
+  color: var(--color-primary);
+  font-weight: var(--font-weight-bold);
+  margin-bottom: var(--space-s);
+}
+
+.webhook-token-value {
+  display: block;
+  background-color: var(--input-bg);
+  padding: var(--space-s) var(--space-m);
+  border-radius: var(--radius-s);
+  font-size: var(--font-size-s);
+  word-break: break-all;
+  margin-bottom: var(--space-s);
+  color: var(--text);
+}
+
+.webhook-token-copy {
+  width: auto;
+  padding: 0 var(--space-l);
+  height: 2rem;
+  font-size: var(--font-size-s);
+}
+
+.add-webhook-form {
+  margin-bottom: var(--space-l);
+}
+
+.add-webhook-form select {
+  width: 100%;
+  height: var(--input-height);
+  background-color: var(--input-bg);
+  border: var(--border-width) solid var(--input-border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 0 var(--space-l);
+  font-size: var(--font-size-m);
 }

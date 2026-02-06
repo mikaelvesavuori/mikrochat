@@ -1,3 +1,13 @@
+import { state } from './state.mjs';
+import { API_BASE_URL, DEBUG_MODE } from './config.mjs';
+import { getAccessToken, signout } from './auth.mjs';
+import { showToast, renderChannelItem, updateDocumentTitle, showDesktopNotification } from './ui.mjs';
+import { appendMessage, updateMessageInUI, removeMessageFromUI } from './messages.mjs';
+import { updateReactionInUI } from './reactions.mjs';
+import { loadChannels } from './channels.mjs';
+import { loadConversations, updateConversationInCache, incrementDmUnread } from './conversations.mjs';
+import { appendDMMessage, updateDMMessageInView, removeDMMessageFromView } from './dmMessages.mjs';
+
 // Event-specific globals
 const MAX_SSE_RECONNECT_ATTEMPTS = 5;
 const MAX_SSE_ERRORS_REPORTED = 3;
@@ -9,10 +19,10 @@ let sseErrorsReported = 0;
  * @description Sets up the handling of Server Side Events,
  * to allow for real-time updates inside MikroChat.
  */
-async function setupMessageEvents(channelId) {
-  if (messageEventSource) {
-    messageEventSource.close();
-    messageEventSource = null;
+export async function setupMessageEvents(channelId) {
+  if (state.messageEventSource) {
+    state.messageEventSource.close();
+    state.messageEventSource = null;
   }
 
   if (sseReconnectTimeout) {
@@ -25,18 +35,18 @@ async function setupMessageEvents(channelId) {
 
   try {
     // Create new SSE connection
-    messageEventSource = new EventSource(
+    state.messageEventSource = new EventSource(
       `${API_BASE_URL}/events?token=${token}`
     );
 
     // Connection opened successfully
-    messageEventSource.onopen = function () {
+    state.messageEventSource.onopen = function () {
       sseReconnectAttempts = 0;
       sseErrorsReported = 0;
     };
 
     // Handle incoming messages
-    messageEventSource.onmessage = async function (event) {
+    state.messageEventSource.onmessage = async function (event) {
       try {
         const data = JSON.parse(event.data);
 
@@ -49,13 +59,13 @@ async function setupMessageEvents(channelId) {
 
           case 'NEW_MESSAGE':
             // If message is for current channel, append it
-            if (data.payload.channelId === currentChannelId) {
+            if (data.payload.channelId === state.currentChannelId) {
               await appendMessage(data.payload);
             } else {
               // Otherwise, increment the unread count
               const currentCount =
-                unreadCounts.get(data.payload.channelId) || 0;
-              unreadCounts.set(data.payload.channelId, currentCount + 1);
+                state.unreadCounts.get(data.payload.channelId) || 0;
+              state.unreadCounts.set(data.payload.channelId, currentCount + 1);
 
               // Find the channel in the list and update it
               const channelEl = document.querySelector(
@@ -76,14 +86,16 @@ async function setupMessageEvents(channelId) {
                 ? channelEl.querySelector('.channel-name').textContent
                 : 'another channel';
               showToast(`${authorName} posted in #${channelName}`, 'info');
+              updateDocumentTitle();
+              showDesktopNotification(`#${channelName}`, `${authorName}: ${data.payload.content}`);
             }
             break;
 
           case 'UPDATE_MESSAGE':
-            if (data.payload.channelId === currentChannelId) {
-              if (messageCache.has(data.payload.id)) {
-                messageCache.set(data.payload.id, {
-                  ...messageCache.get(data.payload.id),
+            if (data.payload.channelId === state.currentChannelId) {
+              if (state.messageCache.has(data.payload.id)) {
+                state.messageCache.set(data.payload.id, {
+                  ...state.messageCache.get(data.payload.id),
                   content: data.payload.content,
                   images: data.payload.images,
                   updatedAt: data.payload.updatedAt
@@ -94,8 +106,8 @@ async function setupMessageEvents(channelId) {
             break;
 
           case 'DELETE_MESSAGE':
-            if (data.payload.channelId === currentChannelId) {
-              messageCache.delete(data.payload.id);
+            if (data.payload.channelId === state.currentChannelId) {
+              state.messageCache.delete(data.payload.id);
               removeMessageFromUI(data.payload.id);
             }
             break;
@@ -111,7 +123,7 @@ async function setupMessageEvents(channelId) {
               const userId = data.payload.userId;
               const reaction = data.payload.reaction;
 
-              if (userId !== currentUser.id)
+              if (userId !== state.currentUser.id)
                 await updateReactionInUI(messageId, reaction, true, true);
             }
             break;
@@ -124,8 +136,8 @@ async function setupMessageEvents(channelId) {
               const reaction = data.payload.reaction;
 
               // Update cache regardless of who triggered it
-              if (messageCache.has(messageId)) {
-                const cachedMsg = messageCache.get(messageId);
+              if (state.messageCache.has(messageId)) {
+                const cachedMsg = state.messageCache.get(messageId);
                 if (cachedMsg.reactions?.[reaction]) {
                   cachedMsg.reactions[reaction] = cachedMsg.reactions[
                     reaction
@@ -133,35 +145,121 @@ async function setupMessageEvents(channelId) {
                   if (cachedMsg.reactions[reaction].length === 0) {
                     delete cachedMsg.reactions[reaction];
                   }
-                  messageCache.set(messageId, cachedMsg);
+                  state.messageCache.set(messageId, cachedMsg);
                 }
               }
 
-              if (userId !== currentUser.id)
+              if (userId !== state.currentUser.id)
                 await updateReactionInUI(messageId, reaction, false, true);
             }
             break;
 
           case 'REMOVE_USER':
-            if (data.payload.id === currentUser.id) {
+            if (data.payload.id === state.currentUser.id) {
               await signout();
             }
             break;
+
+          case 'NEW_CONVERSATION':
+            // Refresh conversations list
+            await loadConversations();
+            break;
+
+          case 'NEW_DM_MESSAGE':
+            // If this DM is for a conversation the user is part of
+            if (data.payload.channelId.startsWith('dm:')) {
+              if (state.viewMode === 'dm' && data.payload.channelId === state.currentConversationId) {
+                // User is viewing this conversation - append the message
+                appendDMMessage(data.payload);
+              } else {
+                // User is not viewing this conversation - increment unread
+                incrementDmUnread(data.payload.channelId);
+
+                // Show toast notification
+                const authorName = data.payload.author?.userName || 'Someone';
+                showToast(`${authorName} sent you a direct message`, 'info');
+                updateDocumentTitle();
+                showDesktopNotification('Direct Message', `${authorName}: ${data.payload.content}`);
+              }
+
+              // Update conversation's lastMessageAt
+              const conv = state.conversationCache.get(data.payload.channelId);
+              if (conv) {
+                conv.lastMessageAt = data.payload.createdAt;
+                updateConversationInCache(conv);
+              }
+            }
+            break;
+
+          case 'UPDATE_DM_MESSAGE':
+            if (data.payload.channelId.startsWith('dm:')) {
+              updateDMMessageInView(data.payload);
+            }
+            break;
+
+          case 'DELETE_DM_MESSAGE':
+            if (data.payload.conversationId) {
+              removeDMMessageFromView(data.payload.id, data.payload.conversationId);
+            }
+            break;
+
+          case 'NEW_THREAD_REPLY': {
+            const { appendThreadReply, updateThreadBadge } = await import('./threads.mjs');
+
+            if (data.payload.channelId === state.currentChannelId) {
+              updateThreadBadge(data.payload.parentMessageId, data.payload.threadMeta);
+            }
+
+            appendThreadReply(data.payload.reply);
+
+            if (data.payload.reply.author.id !== state.currentUser.id) {
+              const authorName = data.payload.reply.author?.userName || 'Someone';
+              showToast(`${authorName} replied in a thread`, 'info');
+              showDesktopNotification('Thread Reply', `${authorName}: ${data.payload.reply.content}`);
+            }
+            break;
+          }
+
+          case 'UPDATE_THREAD_REPLY': {
+            const { updateThreadReplyInView } = await import('./threads.mjs');
+            updateThreadReplyInView(data.payload);
+            break;
+          }
+
+          case 'DELETE_THREAD_REPLY': {
+            const { removeThreadReplyFromView, updateThreadBadge: updateBadge } = await import('./threads.mjs');
+
+            if (data.payload.channelId === state.currentChannelId) {
+              updateBadge(data.payload.threadId, data.payload.threadMeta);
+            }
+
+            removeThreadReplyFromView(data.payload.id, data.payload.threadId);
+            break;
+          }
+
+          case 'NEW_WEBHOOK':
+          case 'DELETE_WEBHOOK': {
+            if (document.getElementById('server-settings-modal')?.classList.contains('active')) {
+              const { loadWebhooks } = await import('./webhooks.mjs');
+              loadWebhooks();
+            }
+            break;
+          }
         }
       } catch (error) {
         console.error('Error processing SSE event', error);
       }
     };
 
-    messageEventSource.onerror = function (_error) {
+    state.messageEventSource.onerror = function (_error) {
       if (sseErrorsReported < MAX_SSE_ERRORS_REPORTED) sseErrorsReported++;
 
       if (
-        messageEventSource &&
-        messageEventSource.readyState === EventSource.CLOSED
+        state.messageEventSource &&
+        state.messageEventSource.readyState === EventSource.CLOSED
       ) {
-        messageEventSource.close();
-        messageEventSource = null;
+        state.messageEventSource.close();
+        state.messageEventSource = null;
 
         sseReconnectAttempts++;
         const delay = Math.min(1000 * 2 ** sseReconnectAttempts, 30 * 1000);
@@ -187,4 +285,35 @@ async function setupMessageEvents(channelId) {
   } catch (error) {
     console.error('Error setting up SSE connection', error);
   }
+}
+
+/**
+ * @description Listen for online/offline network changes and update UI accordingly.
+ */
+export function setupNetworkListeners() {
+  const offlineBar = document.getElementById('offline-bar');
+  const messageInput = document.getElementById('message-input');
+  const sendButton = document.getElementById('send-button');
+
+  function setOffline() {
+    state.isOffline = true;
+    if (offlineBar) offlineBar.classList.add('visible');
+    if (messageInput) messageInput.disabled = true;
+    if (sendButton) sendButton.disabled = true;
+    showToast('You are offline', 'error');
+  }
+
+  function setOnline() {
+    state.isOffline = false;
+    if (offlineBar) offlineBar.classList.remove('visible');
+    if (messageInput) messageInput.disabled = false;
+    if (sendButton) sendButton.disabled = false;
+    showToast('You are back online', 'success');
+  }
+
+  window.addEventListener('offline', setOffline);
+  window.addEventListener('online', setOnline);
+
+  // Set initial state
+  if (!navigator.onLine) setOffline();
 }
