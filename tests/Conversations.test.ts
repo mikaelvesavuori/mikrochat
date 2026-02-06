@@ -408,11 +408,7 @@ describe('MikroChat Conversations', () => {
       );
 
       // Create 4 messages (1 more than limit)
-      await limitedChat.createDirectMessage(
-        'First',
-        admin.id,
-        conversation.id
-      );
+      await limitedChat.createDirectMessage('First', admin.id, conversation.id);
       await limitedChat.createDirectMessage('Second', user.id, conversation.id);
       await limitedChat.createDirectMessage('Third', admin.id, conversation.id);
       await limitedChat.createDirectMessage('Fourth', user.id, conversation.id);

@@ -107,7 +107,9 @@ export class MikroChat {
           const message = await this.db.getMessageById(msgId);
           if (!message) continue;
           if (message.createdAt < cutoffTimestamp) {
-            const threadReplies = await this.db.listMessagesByThread(message.id);
+            const threadReplies = await this.db.listMessagesByThread(
+              message.id
+            );
             for (const reply of threadReplies) {
               await this.db.deleteMessage(reply.id);
             }
@@ -120,9 +122,12 @@ export class MikroChat {
         }
 
         // Count-based retention: trim excess messages
-        const currentIndex = await this.db.getIndex(`idx:channel-msgs:${channel.id}`);
+        const currentIndex = await this.db.getIndex(
+          `idx:channel-msgs:${channel.id}`
+        );
         if (currentIndex.length > this.config.maxMessagesPerChannel) {
-          const excess = currentIndex.length - this.config.maxMessagesPerChannel;
+          const excess =
+            currentIndex.length - this.config.maxMessagesPerChannel;
           const toRemove = currentIndex.slice(0, excess);
           for (const msgId of toRemove) {
             await this.db.deleteMessage(msgId);
@@ -562,7 +567,10 @@ export class MikroChat {
   /**
    * @description Get all message in a given channel.
    */
-  public async getMessagesByChannel(channelId: string, options?: PaginationOptions): Promise<Message[]> {
+  public async getMessagesByChannel(
+    channelId: string,
+    options?: PaginationOptions
+  ): Promise<Message[]> {
     return await this.db.listMessagesByChannel(channelId, options);
   }
 
@@ -894,7 +902,10 @@ export class MikroChat {
   /**
    * @description Get all replies in a thread.
    */
-  public async getThreadReplies(parentMessageId: string, options?: PaginationOptions): Promise<Message[]> {
+  public async getThreadReplies(
+    parentMessageId: string,
+    options?: PaginationOptions
+  ): Promise<Message[]> {
     return await this.db.listMessagesByThread(parentMessageId, options);
   }
 

@@ -132,11 +132,7 @@ describe('MikroChat Threads', () => {
   describe('Thread Reply Listing', () => {
     it('should list thread replies in order', async () => {
       await chat.createThreadReply('Reply 1', adminUser.id, parentMessage.id);
-      await chat.createThreadReply(
-        'Reply 2',
-        regularUser.id,
-        parentMessage.id
-      );
+      await chat.createThreadReply('Reply 2', regularUser.id, parentMessage.id);
 
       const replies = await chat.getThreadReplies(parentMessage.id);
       expect(replies.length).toBe(2);
@@ -155,14 +151,9 @@ describe('MikroChat Threads', () => {
         adminUser.id,
         parentMessage.id
       );
-      await chat.createMessage(
-        'Channel message',
-        adminUser.id,
-        testChannelId
-      );
+      await chat.createMessage('Channel message', adminUser.id, testChannelId);
 
-      const channelMessages =
-        await chat.getMessagesByChannel(testChannelId);
+      const channelMessages = await chat.getMessagesByChannel(testChannelId);
       const threadReplies = channelMessages.filter((m) => m.threadId);
       expect(threadReplies.length).toBe(0);
 
@@ -212,9 +203,7 @@ describe('MikroChat Threads', () => {
 
       await chat.updateThreadReply(reply.id, adminUser.id, 'Updated');
 
-      const updateEvent = events.find(
-        (e) => e.type === 'UPDATE_THREAD_REPLY'
-      );
+      const updateEvent = events.find((e) => e.type === 'UPDATE_THREAD_REPLY');
       expect(updateEvent).toBeDefined();
     });
 
@@ -280,11 +269,7 @@ describe('MikroChat Threads', () => {
         adminUser.id,
         parentMessage.id
       );
-      await chat.createThreadReply(
-        'Reply 2',
-        regularUser.id,
-        parentMessage.id
-      );
+      await chat.createThreadReply('Reply 2', regularUser.id, parentMessage.id);
 
       await chat.deleteThreadReply(reply1.id, adminUser.id);
 
@@ -314,9 +299,7 @@ describe('MikroChat Threads', () => {
 
       await chat.deleteThreadReply(reply.id, adminUser.id);
 
-      const deleteEvent = events.find(
-        (e) => e.type === 'DELETE_THREAD_REPLY'
-      );
+      const deleteEvent = events.find((e) => e.type === 'DELETE_THREAD_REPLY');
       expect(deleteEvent).toBeDefined();
       expect(deleteEvent?.payload).toMatchObject({
         id: reply.id,

@@ -91,11 +91,20 @@ export abstract class GeneralStorageProvider {
     await this.db.set(`message:${message.id}`, message);
 
     if (message.threadId) {
-      await this.appendToIndex(`idx:thread-msgs:${message.threadId}`, message.id);
+      await this.appendToIndex(
+        `idx:thread-msgs:${message.threadId}`,
+        message.id
+      );
     } else if (message.channelId.startsWith('dm:')) {
-      await this.appendToIndex(`idx:conv-msgs:${message.channelId}`, message.id);
+      await this.appendToIndex(
+        `idx:conv-msgs:${message.channelId}`,
+        message.id
+      );
     } else {
-      await this.appendToIndex(`idx:channel-msgs:${message.channelId}`, message.id);
+      await this.appendToIndex(
+        `idx:channel-msgs:${message.channelId}`,
+        message.id
+      );
     }
   }
 

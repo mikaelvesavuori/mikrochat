@@ -119,11 +119,21 @@ export type ServerSentEvent =
     }
   // Direct Messages / Conversations
   | { type: 'NEW_CONVERSATION'; payload: Conversation }
-  | { type: 'NEW_DM_MESSAGE'; payload: Message & { participants: [string, string] } }
-  | { type: 'UPDATE_DM_MESSAGE'; payload: Message & { participants: [string, string] } }
+  | {
+      type: 'NEW_DM_MESSAGE';
+      payload: Message & { participants: [string, string] };
+    }
+  | {
+      type: 'UPDATE_DM_MESSAGE';
+      payload: Message & { participants: [string, string] };
+    }
   | {
       type: 'DELETE_DM_MESSAGE';
-      payload: { id: string; conversationId: string; participants: [string, string] };
+      payload: {
+        id: string;
+        conversationId: string;
+        participants: [string, string];
+      };
     }
   // Threads
   | {
@@ -182,7 +192,10 @@ export interface StorageProvider {
   listChannels(): Promise<Channel[]>;
 
   getMessageById(id: string): Promise<Message | null>;
-  listMessagesByChannel(channelId: string, options?: PaginationOptions): Promise<Message[]>;
+  listMessagesByChannel(
+    channelId: string,
+    options?: PaginationOptions
+  ): Promise<Message[]>;
   createMessage(message: Message): Promise<void>;
   updateMessage(message: Message): Promise<void>;
   deleteMessage(id: string): Promise<void>;
@@ -205,9 +218,15 @@ export interface StorageProvider {
   createConversation(conversation: Conversation): Promise<void>;
   updateConversation(conversation: Conversation): Promise<void>;
   listConversationsForUser(userId: string): Promise<Conversation[]>;
-  listMessagesByConversation(conversationId: string, options?: PaginationOptions): Promise<Message[]>;
+  listMessagesByConversation(
+    conversationId: string,
+    options?: PaginationOptions
+  ): Promise<Message[]>;
 
-  listMessagesByThread(threadId: string, options?: PaginationOptions): Promise<Message[]>;
+  listMessagesByThread(
+    threadId: string,
+    options?: PaginationOptions
+  ): Promise<Message[]>;
 
   getWebhookById(id: string): Promise<Webhook | null>;
   getWebhookByToken(token: string): Promise<Webhook | null>;

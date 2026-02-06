@@ -195,10 +195,7 @@ export async function startServer(settings: ServerSettings) {
       if (!email || !token)
         return c.json({ error: 'Email and token are required' }, 400);
       if (!password || password.length < 8)
-        return c.json(
-          { error: 'Password must be at least 8 characters' },
-          400
-        );
+        return c.json({ error: 'Password must be at least 8 characters' }, 400);
 
       try {
         const tokens = await auth.verifyToken({ email, token });
@@ -1254,9 +1251,10 @@ export async function startServer(settings: ServerSettings) {
 
         const imageBuffer = readFileSync(filePath);
 
-        const fileExtension = serveThumbnail && existsSync(thumbPath)
-          ? 'jpg'
-          : filename.split('.').pop()?.toLowerCase();
+        const fileExtension =
+          serveThumbnail && existsSync(thumbPath)
+            ? 'jpg'
+            : filename.split('.').pop()?.toLowerCase();
         let contentType = 'application/octet-stream'; // Default
 
         if (fileExtension === 'jpg' || fileExtension === 'jpeg')
@@ -1377,9 +1375,10 @@ export async function startServer(settings: ServerSettings) {
 
         const imageBuffer = readFileSync(filePath);
 
-        const fileExtension = serveThumbnail && existsSync(thumbPath)
-          ? 'jpg'
-          : filename.split('.').pop()?.toLowerCase();
+        const fileExtension =
+          serveThumbnail && existsSync(thumbPath)
+            ? 'jpg'
+            : filename.split('.').pop()?.toLowerCase();
         let contentType = 'application/octet-stream'; // Default
 
         if (fileExtension === 'jpg' || fileExtension === 'jpeg')
