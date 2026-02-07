@@ -2,7 +2,12 @@
  * @description Conversation (Direct Messages) related functionality.
  */
 import { state } from './state.mjs';
-import { dmList, startDmModal, dmUserList, messagesArea, currentChannelName } from './dom.mjs';
+import {
+  dmList,
+  startDmModal,
+  dmUserList,
+  currentChannelName
+} from './dom.mjs';
 import { showToast, updateDocumentTitle } from './ui.mjs';
 import { loadDMMessagesForConversation } from './dmMessages.mjs';
 import { apiRequest } from './api.mjs';
@@ -92,7 +97,9 @@ export async function selectConversation(conversationId) {
   state.viewMode = 'dm';
 
   // Update active states
-  document.querySelectorAll('.channel-item').forEach((el) => el.classList.remove('active'));
+  document.querySelectorAll('.channel-item').forEach((el) => {
+    el.classList.remove('active');
+  });
   document.querySelectorAll('.dm-item').forEach((el) => {
     el.classList.toggle('active', el.dataset.conversationId === conversationId);
   });
@@ -125,7 +132,9 @@ export async function selectConversation(conversationId) {
  */
 export async function startConversation(targetUserId) {
   try {
-    const response = await apiRequest('/conversations', 'POST', { targetUserId });
+    const response = await apiRequest('/conversations', 'POST', {
+      targetUserId
+    });
     const { conversation, isNew } = response;
 
     // Add to cache
@@ -187,7 +196,8 @@ function renderDmUserSelectList(users) {
   dmUserList.innerHTML = '';
 
   if (users.length === 0) {
-    dmUserList.innerHTML = '<div class="empty-list">No other users available</div>';
+    dmUserList.innerHTML =
+      '<div class="empty-list">No other users available</div>';
     return;
   }
 
@@ -195,7 +205,9 @@ function renderDmUserSelectList(users) {
     const item = document.createElement('div');
     item.className = 'dm-user-item';
 
-    const initial = user.userName?.charAt(0).toUpperCase() || user.email.charAt(0).toUpperCase();
+    const initial =
+      user.userName?.charAt(0).toUpperCase() ||
+      user.email.charAt(0).toUpperCase();
 
     item.innerHTML = `
       <div class="user-avatar">${initial}</div>
@@ -218,7 +230,10 @@ export function updateConversationInCache(conversation) {
   state.conversationCache.set(conversation.id, conversation);
   const conversations = Array.from(state.conversationCache.values());
   // Sort by lastMessageAt
-  conversations.sort((a, b) => (b.lastMessageAt || b.createdAt) - (a.lastMessageAt || a.createdAt));
+  conversations.sort(
+    (a, b) =>
+      (b.lastMessageAt || b.createdAt) - (a.lastMessageAt || a.createdAt)
+  );
   renderConversationsList(conversations);
 }
 

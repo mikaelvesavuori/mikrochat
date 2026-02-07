@@ -2,7 +2,15 @@ import { AUTH_MODE } from './config.mjs';
 import { isEncryptionPasswordRequired, isAuthenticated } from './auth.mjs';
 import { initializeStorage } from './storage.mjs';
 import { isMagicLinkUrl } from './magiclink.mjs';
-import { showToast, showLoading, hideLoading, showAuthScreen, showAppScreen, requestNotificationPermission } from './ui.mjs';
+import { isOAuthCallback, handleOAuthCallback } from './oauth.mjs';
+import {
+  showToast,
+  showLoading,
+  hideLoading,
+  showAuthScreen,
+  showAppScreen,
+  requestNotificationPermission
+} from './ui.mjs';
 import { setupNetworkListeners } from './events.mjs';
 
 /**
@@ -12,12 +20,31 @@ export async function handleStart() {
   try {
     showLoading();
 
+    // Handle OAuth callback (tokens in URL from server redirect)
+    if (isOAuthCallback()) {
+      try {
+        await handleOAuthCallback();
+        requestNotificationPermission();
+        showToast('Successfully logged in!');
+        return await showAppScreen();
+      } catch (error) {
+        hideLoading();
+        showToast(error.message || 'OAuth sign-in failed', 'error');
+        return await showAuthScreen();
+      }
+    }
+
     // Allow magic link URLs for both magic-link and password auth modes (password uses them for invites)
-    if (isMagicLinkUrl() && AUTH_MODE !== 'magic-link' && AUTH_MODE !== 'password')
+    if (
+      isMagicLinkUrl() &&
+      AUTH_MODE !== 'magic-link' &&
+      AUTH_MODE !== 'password'
+    )
       window.location = '/';
 
     // Password invite URLs should always go to the auth screen for password setup
-    if (isMagicLinkUrl() && AUTH_MODE === 'password') return await showAuthScreen();
+    if (isMagicLinkUrl() && AUTH_MODE === 'password')
+      return await showAuthScreen();
 
     // We always need to check for the encryption key if this is not shared, regardless if user is authed or not
     if (isEncryptionPasswordRequired()) return await showAuthScreen();

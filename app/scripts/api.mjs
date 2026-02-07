@@ -3,7 +3,10 @@ import { AUTH_MODE, API_BASE_URL } from './config.mjs';
 import { showToast } from './ui.mjs';
 import { getAccessToken, isTokenExpired, refreshTokens } from './auth.mjs';
 import { showAuthScreen } from './ui.mjs';
-import { handleOfflineMessageCreation, removeImageFromMessage } from './messages.mjs';
+import {
+  handleOfflineMessageCreation,
+  removeImageFromMessage
+} from './messages.mjs';
 
 /**
  * @description Helper function to make API requests to the MikroChat backend.
@@ -33,7 +36,7 @@ export async function apiRequest(
     throw new Error('Offline - cannot perform this action');
   }
 
-  if (AUTH_MODE === 'magic-link' && endpoint !== '/auth/login') {
+  if (AUTH_MODE !== 'dev' && endpoint !== '/auth/login') {
     try {
       if (await isTokenExpired()) {
         await refreshTokens();
@@ -124,7 +127,7 @@ export async function apiRequest(
       // Try to parse as JSON anyway in case content-type is wrong
       try {
         return JSON.parse(text);
-      } catch (e) {
+      } catch (_e) {
         // Return as plain text if not JSON
         return { success: true, text };
       }

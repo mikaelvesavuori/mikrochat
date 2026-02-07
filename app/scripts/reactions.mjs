@@ -51,7 +51,9 @@ export async function addReaction(messageId, reaction) {
 
       if (!cachedMessage.reactions[reaction])
         cachedMessage.reactions[reaction] = [state.currentUser.id];
-      else if (!cachedMessage.reactions[reaction].includes(state.currentUser.id))
+      else if (
+        !cachedMessage.reactions[reaction].includes(state.currentUser.id)
+      )
         cachedMessage.reactions[reaction].push(state.currentUser.id);
 
       state.messageCache.set(messageId, cachedMessage);

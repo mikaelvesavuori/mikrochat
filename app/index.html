@@ -45,6 +45,9 @@
         <h2>Welcome Back!</h2>
         <p id="auth-form-text"></p>
 
+        <div id="oauth-providers" style="display: none;"></div>
+        <div class="auth-divider" id="auth-divider" style="display: none;"><span>or</span></div>
+
         <div class="form-group" id="auth-form-email">
           <label for="auth-email">Email</label>
           <input type="email" id="auth-email">
@@ -70,6 +73,19 @@
 
         <div class="auth-toggle" id="auth-toggle" style="display: none;">
           <a href="#" id="auth-toggle-link"></a>
+        </div>
+
+        <div class="auth-forgot-password" id="auth-forgot-password" style="display: none;">
+          <a href="#" id="auth-forgot-password-link">Forgot password?</a>
+        </div>
+      </div>
+
+      <!-- Password reset sent screen -->
+      <div class="auth-form" id="password-reset-sent-form" style="display: none;">
+        <h2>Check Your Email</h2>
+        <div id="password-reset-sent-message" class="magic-link-message"></div>
+        <div class="auth-back">
+          <a href="" id="back-to-login-from-reset">← Back</a>
         </div>
       </div>
 

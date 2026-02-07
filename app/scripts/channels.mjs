@@ -33,12 +33,15 @@ export async function loadChannels() {
  * @description Navigate to a given channel.
  */
 export async function selectChannel(channelId, channelName) {
-  if (channelId === state.currentChannelId && state.viewMode === 'channel') return;
+  if (channelId === state.currentChannelId && state.viewMode === 'channel')
+    return;
 
   // Clear DM selection
   state.currentConversationId = null;
   state.viewMode = 'channel';
-  document.querySelectorAll('.dm-item').forEach((el) => el.classList.remove('active'));
+  document.querySelectorAll('.dm-item').forEach((el) => {
+    el.classList.remove('active');
+  });
 
   // Restore # prefix for channels
   currentChannelName.style.removeProperty('--channel-prefix');

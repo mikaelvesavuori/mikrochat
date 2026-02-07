@@ -61,7 +61,8 @@ export const configDefaults = () => {
       },
       messageRetentionDays: 30,
       maxMessagesPerChannel: 100
-    }
+    },
+    oauth: undefined as undefined
   };
 };
 

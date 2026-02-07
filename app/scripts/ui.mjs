@@ -22,12 +22,21 @@ import {
   editMessageInput,
   editMessageModal,
   editChannelNameInput,
-  editChannelModal
+  editChannelModal,
+  oauthProviders,
+  authDivider,
+  authForgotPassword,
+  passwordResetSentForm,
+  passwordResetSentMessage
 } from './dom.mjs';
-import { AUTH_MODE, DEFAULT_PASSWORD } from './config.mjs';
+import { AUTH_MODE, DEFAULT_PASSWORD, ENABLE_OAUTH } from './config.mjs';
 import { getUrlParams } from './url.mjs';
 import { isMagicLinkUrl } from './magiclink.mjs';
-import { isAuthenticated, isEncryptionPasswordRequired, getUserInfo } from './auth.mjs';
+import {
+  isAuthenticated,
+  isEncryptionPasswordRequired,
+  getUserInfo
+} from './auth.mjs';
 import { setupStorage } from './storage.mjs';
 import { getInitials, getReactionsContainer } from './utils.mjs';
 import { setTheme } from './theme.mjs';
@@ -44,6 +53,9 @@ export async function showAuthScreen() {
 
   authContainer.style.display = 'block';
   appContainer.style.display = 'none';
+
+  // Set up OAuth provider buttons (non-blocking)
+  setupOAuthProviders();
 
   const authed = isAuthenticated();
 
@@ -99,7 +111,10 @@ export async function showAuthScreen() {
   - Unauthenticated -> Display email + password sign in form
   */
   if (AUTH_MODE === 'password') {
-    const { emailParam, tokenParam } = getUrlParams();
+    const { emailParam, tokenParam, resetParam } = getUrlParams();
+
+    if (emailParam && tokenParam && resetParam)
+      return renderPasswordResetView(emailParam);
 
     if (emailParam && tokenParam) return renderPasswordSetupView(emailParam);
 
@@ -109,6 +124,53 @@ export async function showAuthScreen() {
     }
 
     return renderPasswordSignInView();
+  }
+}
+
+/**
+ * @description Fetch and render OAuth provider buttons on the auth screen.
+ * Only runs when ENABLE_OAUTH is true. Non-blocking.
+ */
+async function setupOAuthProviders() {
+  if (!ENABLE_OAUTH) {
+    oauthProviders.style.display = 'none';
+    authDivider.style.display = 'none';
+    return;
+  }
+
+  try {
+    const { fetchOAuthProviders, getProviderIcon, initiateOAuth } =
+      await import('./oauth.mjs');
+    const providers = await fetchOAuthProviders();
+
+    if (providers.length === 0) {
+      oauthProviders.style.display = 'none';
+      authDivider.style.display = 'none';
+      return;
+    }
+
+    oauthProviders.innerHTML = providers
+      .map((provider) => {
+        const icon = getProviderIcon(provider.id);
+        return `<button type="button" class="btn oauth-btn oauth-btn-${provider.id}" data-provider="${provider.id}">
+          ${icon ? `<span class="oauth-btn-icon">${icon}</span>` : ''}
+          <span>Sign in with ${provider.name}</span>
+        </button>`;
+      })
+      .join('');
+
+    oauthProviders.style.display = 'block';
+    authDivider.style.display = 'flex';
+
+    oauthProviders.querySelectorAll('.oauth-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        initiateOAuth(btn.dataset.provider);
+      });
+    });
+  } catch (error) {
+    console.error('Failed to load OAuth providers:', error);
+    oauthProviders.style.display = 'none';
+    authDivider.style.display = 'none';
   }
 }
 
@@ -181,6 +243,7 @@ export function renderPasswordSignInView() {
   authPasswordGroup.style.display = 'block';
   authPasswordConfirmGroup.style.display = 'none';
   authToggle.style.display = 'none';
+  authForgotPassword.style.display = 'block';
   loginButton.textContent = 'Sign In';
 
   hideLoading();
@@ -216,6 +279,52 @@ export function renderPasswordRegisterView() {
   loginButton.textContent = 'Create Account';
 
   hideLoading();
+}
+
+/**
+ * @description Password mode: Show "Forgot password?" screen with email input only.
+ */
+export function renderForgotPasswordView() {
+  textElement.textContent =
+    'Enter your email to receive a password reset link.';
+  emailForm.style.display = 'block';
+  emailInput.value = '';
+  encryptionForm.style.display = 'none';
+  authPasswordGroup.style.display = 'none';
+  authPasswordConfirmGroup.style.display = 'none';
+  authToggle.style.display = 'none';
+  authForgotPassword.style.display = 'none';
+  loginButton.textContent = 'Send Reset Link';
+
+  hideLoading();
+}
+
+/**
+ * @description Password mode: Show "Reset your password" form from a reset link.
+ */
+export function renderPasswordResetView(email) {
+  textElement.textContent = 'Reset your password.';
+  emailForm.style.display = 'none';
+  emailInput.value = email;
+  encryptionForm.style.display = 'none';
+  authPasswordGroup.style.display = 'block';
+  authPasswordConfirmGroup.style.display = 'block';
+  authToggle.style.display = 'none';
+  authForgotPassword.style.display = 'none';
+  loginButton.textContent = 'Reset Password';
+
+  hideLoading();
+}
+
+/**
+ * @description Password mode: Show confirmation after requesting a password reset.
+ */
+export function renderPasswordResetSent(message) {
+  document.querySelector('.auth-form').style.display = 'none';
+  passwordResetSentMessage.textContent =
+    message ||
+    'If a matching account was found, a password reset link has been sent. Please check your inbox.';
+  passwordResetSentForm.style.display = 'block';
 }
 
 /**
@@ -326,7 +435,8 @@ export async function renderChannelItem(channel) {
   }
 
   // Set active state
-  if (channel.id === state.currentChannelId) channelItem.classList.add('active');
+  if (channel.id === state.currentChannelId)
+    channelItem.classList.add('active');
   else channelItem.classList.remove('active');
 }
 
@@ -334,8 +444,6 @@ export async function renderChannelItem(channel) {
  * @description Update the user interface to correctly reflect the pending image uploads.
  */
 export function updatePendingUploadsUI() {
-  const { removePendingUpload } = import('./images.mjs');
-
   const container = document.getElementById('pending-uploads-container');
   const uploadsContainer = document.getElementById('pending-uploads');
 
@@ -361,7 +469,7 @@ export function updatePendingUploadsUI() {
   removeButtons.forEach((button) => {
     button.addEventListener('click', async (e) => {
       const { removePendingUpload } = await import('./images.mjs');
-      const index = Number.parseInt(e.target.dataset.index);
+      const index = Number.parseInt(e.target.dataset.index, 10);
       removePendingUpload(index);
     });
   });
@@ -523,7 +631,9 @@ export function closeEditChannelModal() {
 export function closeAllModals() {
   const activeModals = document.querySelectorAll('.modal-backdrop.active');
 
-  activeModals.forEach((modal) => modal.classList.remove('active'));
+  activeModals.forEach((modal) => {
+    modal.classList.remove('active');
+  });
 
   state.currentMessageForReaction = null;
   state.currentMessageForEdit = null;

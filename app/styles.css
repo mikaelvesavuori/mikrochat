@@ -228,6 +228,78 @@ noscript div.message {
   text-decoration: underline;
 }
 
+.auth-forgot-password {
+  margin-top: 0.75rem;
+  text-align: center;
+}
+
+.auth-forgot-password a {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-size: var(--font-size-s);
+}
+
+.auth-forgot-password a:hover {
+  text-decoration: underline;
+}
+
+/* OAuth */
+#oauth-providers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-s);
+}
+
+.oauth-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-s);
+  width: 100%;
+  padding: var(--space-m) var(--space-l);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius);
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: var(--font-size-m);
+  cursor: pointer;
+  transition:
+    background var(--transition),
+    border-color var(--transition);
+}
+
+.oauth-btn:hover {
+  background: var(--hover-bg);
+  border-color: var(--color-primary);
+}
+
+.oauth-btn-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.oauth-btn-icon svg {
+  display: block;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-m);
+  margin: var(--space-l) 0;
+  color: var(--color-gray);
+  font-size: var(--font-size-s);
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: var(--border-width);
+  background: var(--border-color);
+}
+
 .helper-text {
   color: var(--color-gray);
   font-size: var(--font-size-xs);
@@ -831,8 +903,8 @@ h2#current-channel-name {
   justify-content: center;
   align-items: center;
   background-color: var(--transparent);
-  width: auto !important;
-  max-width: 90vw !important;
+  width: auto;
+  max-width: 90vw;
   max-height: 90vh;
   position: relative;
   margin: 0 auto;
@@ -1154,12 +1226,15 @@ input[type="password"]:focus {
   cursor: pointer;
   font-size: 1rem;
   z-index: 2;
-  opacity: 0; /* Start hidden */
-  transition: opacity var(--transition); /* Add smooth transition */
+  opacity: 0;
+  /* Start hidden */
+  transition: opacity var(--transition);
+  /* Add smooth transition */
 }
 
 .image-wrapper:hover .remove-image-btn {
-  opacity: 1; /* Show on hover */
+  opacity: 1;
+  /* Show on hover */
 }
 
 .message-image {
@@ -1176,7 +1251,9 @@ input[type="password"]:focus {
   z-index: -1;
   opacity: 0;
   padding: var(--space-m) var(--space-xl);
-  transition: opacity 0.3s, transform 0.3s;
+  transition:
+    opacity 0.3s,
+    transform 0.3s;
   position: fixed;
   top: 1.25rem;
   right: 1.25rem;
@@ -1415,6 +1492,7 @@ input[type="password"]:focus {
     opacity: 0;
     transform: translateY(0.6rem);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -1425,6 +1503,7 @@ input[type="password"]:focus {
   0% {
     transform: rotate(0);
   }
+
   to {
     transform: rotate(360deg);
   }

@@ -1,5 +1,6 @@
 import type { MikroAuth } from 'mikroauth';
 import type { MikroChat } from '../MikroChat';
+import type { OAuthConfiguration } from '../oauth/interfaces';
 
 type UnixTimestamp = number;
 
@@ -84,6 +85,7 @@ export type ServerSettings = {
   devMode: boolean;
   isInviteRequired: boolean;
   authMode: 'magic-link' | 'password';
+  oauth?: OAuthConfiguration;
 };
 
 export type ServerSentEvent =
@@ -253,6 +255,7 @@ export type CombinedConfiguration = {
   server: ServerConfiguration;
   storage: StorageConfiguration;
   devMode: boolean;
+  oauth?: OAuthConfiguration;
 };
 
 /**

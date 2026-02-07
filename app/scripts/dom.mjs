@@ -31,11 +31,11 @@ export const createChannelSubmit = document.getElementById(
 export const currentChannelName = document.getElementById(
   'current-channel-name'
 );
-export const deleteChannelButton = document.getElementById(
-  'delete-channel-btn'
-);
+export const deleteChannelButton =
+  document.getElementById('delete-channel-btn');
 export const editChannelModal = document.getElementById('edit-channel-modal');
-export const editChannelNameInput = document.getElementById('edit-channel-name');
+export const editChannelNameInput =
+  document.getElementById('edit-channel-name');
 export const editMessageInput = document.getElementById('edit-message-input');
 export const editMessageModal = document.getElementById('edit-message-modal');
 export const editMessageSubmit = document.getElementById('edit-message-submit');
@@ -103,11 +103,33 @@ export const authToggleLink = document.getElementById('auth-toggle-link');
 export const dmList = document.getElementById('dm-list');
 export const startDmButton = document.getElementById('start-dm-btn');
 export const startDmModal = document.getElementById('start-dm-modal');
-export const closeStartDmModal = document.getElementById('close-start-dm-modal');
+export const closeStartDmModal = document.getElementById(
+  'close-start-dm-modal'
+);
 export const dmUserList = document.getElementById('dm-user-list');
+
+// Password reset elements
+export const authForgotPassword = document.getElementById(
+  'auth-forgot-password'
+);
+export const authForgotPasswordLink = document.getElementById(
+  'auth-forgot-password-link'
+);
+export const passwordResetSentForm = document.getElementById(
+  'password-reset-sent-form'
+);
+export const passwordResetSentMessage = document.getElementById(
+  'password-reset-sent-message'
+);
+
+// OAuth elements
+export const oauthProviders = document.getElementById('oauth-providers');
+export const authDivider = document.getElementById('auth-divider');
 
 // Webhook elements
 export const addWebhookButton = document.getElementById('add-webhook-btn');
 export const webhookNameInput = document.getElementById('webhook-name-input');
-export const webhookChannelSelect = document.getElementById('webhook-channel-select');
+export const webhookChannelSelect = document.getElementById(
+  'webhook-channel-select'
+);
 export const webhooksList = document.getElementById('webhooks-list');

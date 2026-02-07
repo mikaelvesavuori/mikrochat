@@ -13,8 +13,12 @@ import { type Context, MikroServe } from 'mikroserve';
 import type { Message, ServerSettings, User } from './interfaces';
 import { MikroChat } from './MikroChat';
 
+import { OAuthProvider } from './oauth/OAuthService';
+import { OAuthSecurity } from './oauth/OAuthSecurity';
+import { resolveOAuthProviders } from './oauth/OAuthProviderResolver';
+
 const DEFAULT_PAGE_LIMIT = 50;
-const MAX_IMAGE_SIZE_IN_MB = 2; // TODO: Enable larger images
+const MAX_IMAGE_SIZE_IN_MB = 10;
 const VALID_FILE_FORMATS = ['jpg', 'jpeg', 'png', 'webp', 'svg'];
 
 const MAX_CONNECTIONS_PER_USER = 3;
@@ -183,9 +187,36 @@ export async function startServer(settings: ServerSettings) {
     });
 
     /**
+     * @description Request a password reset email.
+     * Always returns success to prevent email enumeration.
+     * Only sends the email if the user exists and has a password set.
+     */
+    server.post('/auth/request-password-reset', async (c: Context) => {
+      const { email } = c.body;
+      if (!email) return c.json({ error: 'Email is required' }, 400);
+
+      try {
+        const user = await chat.getUserByEmail(email);
+        if (user?.passwordHash) await auth.createMagicLink({ email });
+      } catch {
+        // Silently ignore errors to prevent email enumeration
+      }
+
+      return c.json(
+        {
+          success: true,
+          message:
+            'If a matching account was found, a password reset link has been sent.'
+        },
+        200
+      );
+    });
+
+    /**
      * @description Set password for an invited user via a magic link token.
      * The invite email uses the same magic link mechanism; the frontend
      * shows a "set password" form instead of auto-verifying.
+     * Also used for password reset — the same token mechanism applies.
      */
     server.post('/auth/setup-password', async (c: Context) => {
       const { email, password } = c.body;
@@ -246,6 +277,174 @@ export async function startServer(settings: ServerSettings) {
           return c.json({ error: message }, 400);
         }
       });
+    }
+  }
+
+  //////////////////
+  // OAuth Auth   //
+  //////////////////
+
+  const { oauth } = settings;
+
+  if (oauth) {
+    const oauthSecurity = new OAuthSecurity(oauth);
+    const oauthProviders = new Map<string, OAuthProvider>();
+
+    const providerConfigs = resolveOAuthProviders(oauth);
+    for (const providerConfig of providerConfigs) {
+      const provider = new OAuthProvider(providerConfig, auth);
+      oauthProviders.set(providerConfig.id, provider);
+    }
+
+    if (oauthProviders.size > 0) {
+      /**
+       * @description List available OAuth providers.
+       */
+      server.get('/auth/oauth/providers', async (c: Context) => {
+        const providerList = Array.from(oauthProviders.values()).map(
+          (provider) => provider.getPublicInfo()
+        );
+        return c.json({ providers: providerList, count: providerList.length });
+      });
+
+      for (const [providerId, provider] of oauthProviders.entries()) {
+        /**
+         * @description Initiate OAuth flow for a specific provider.
+         * Generates CSRF state and redirects the user to the OAuth provider.
+         */
+        server.get(`/auth/oauth/${providerId}`, async (c: Context) => {
+          try {
+            const forwardedFor = c.headers['x-forwarded-for'];
+            const realIp = c.headers['x-real-ip'];
+            const ip =
+              (Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor)
+                ?.split(',')[0]
+                ?.trim() ||
+              (Array.isArray(realIp) ? realIp[0] : realIp) ||
+              'unknown';
+
+            if (!oauthSecurity.checkRateLimit(`oauth:${ip}`)) {
+              const info = oauthSecurity.getRateLimitInfo(`oauth:${ip}`);
+              return c.json(
+                {
+                  error:
+                    'Too many authentication attempts. Please try again later.',
+                  retryAfter: Math.ceil((info.reset - Date.now()) / 1000)
+                },
+                429
+              );
+            }
+
+            const state = oauthSecurity.generateState(ip, providerId);
+            const authUrl = provider.getAuthorizationUrl(state);
+            return c.redirect(authUrl, 302);
+          } catch (error) {
+            const message =
+              error instanceof Error
+                ? error.message
+                : 'Error initiating OAuth flow';
+            return c.json({ error: message }, 500);
+          }
+        });
+
+        /**
+         * @description Handle OAuth callback for a specific provider.
+         * Validates CSRF state, exchanges code for tokens, and issues JWT.
+         */
+        server.get(`/auth/oauth/${providerId}/callback`, async (c: Context) => {
+          try {
+            const forwardedFor = c.headers['x-forwarded-for'];
+            const realIp = c.headers['x-real-ip'];
+            const ip =
+              (Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor)
+                ?.split(',')[0]
+                ?.trim() ||
+              (Array.isArray(realIp) ? realIp[0] : realIp) ||
+              'unknown';
+
+            if (!oauthSecurity.checkRateLimit(`oauth:${ip}`)) {
+              const info = oauthSecurity.getRateLimitInfo(`oauth:${ip}`);
+              return c.json(
+                {
+                  error:
+                    'Too many authentication attempts. Please try again later.',
+                  retryAfter: Math.ceil((info.reset - Date.now()) / 1000)
+                },
+                429
+              );
+            }
+
+            // Check for OAuth error response
+            const error = c.query.error;
+            if (error) {
+              const description =
+                c.query.error_description || 'Authentication was denied';
+              return c.redirect(
+                `/?oauth_error=${encodeURIComponent(description)}`,
+                302
+              );
+            }
+
+            // Validate CSRF state
+            const state = c.query.state;
+            const code = c.query.code;
+            if (!state || !code)
+              return c.redirect(
+                `/?oauth_error=${encodeURIComponent('Missing state or authorization code')}`,
+                302
+              );
+
+            const validation = oauthSecurity.validateState(
+              state as string,
+              ip,
+              providerId
+            );
+            if (!validation.valid)
+              return c.redirect(
+                `/?oauth_error=${encodeURIComponent(validation.error || 'Invalid OAuth callback')}`,
+                302
+              );
+
+            // Exchange code for tokens and fetch user info
+            const result = await provider.handleCallback(code as string, ip);
+
+            // Find or create user
+            let user = await chat.getUserByEmail(result.user.email);
+
+            if (!user && isInviteRequired) {
+              return c.redirect(
+                `/?oauth_error=${encodeURIComponent('User not found. You must be invited before signing in with OAuth.')}`,
+                302
+              );
+            }
+
+            if (!user) {
+              user = await chat.addUser(
+                result.user.email,
+                result.user.name || result.user.username || result.user.email,
+                false,
+                true
+              );
+            }
+
+            const oauthParams = new URLSearchParams({
+              access_token: result.accessToken,
+              refresh_token: result.refreshToken,
+              expires_in: String(result.expiresIn)
+            });
+            return c.redirect(`/?${oauthParams.toString()}`, 302);
+          } catch (error) {
+            const message =
+              error instanceof Error
+                ? error.message
+                : 'OAuth authentication failed';
+            return c.redirect(
+              `/?oauth_error=${encodeURIComponent(message)}`,
+              302
+            );
+          }
+        });
+      }
     }
   }
 

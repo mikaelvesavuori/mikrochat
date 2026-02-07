@@ -47,10 +47,14 @@ export async function sendMessage(content) {
     const { sendDMMessage, uploadDMImage } = await import('./dmMessages.mjs');
     try {
       // Handle image uploads for DM
-      let uploadedImages = [];
+      const uploadedImages = [];
       if (state.pendingUploads.length > 0) {
         for (const upload of state.pendingUploads) {
-          const filename = await uploadDMImage({ name: upload.fileName, blob: upload.blob, thumbnailBlob: upload.thumbnailBlob });
+          const filename = await uploadDMImage({
+            name: upload.fileName,
+            blob: upload.blob,
+            thumbnailBlob: upload.thumbnailBlob
+          });
           if (filename) uploadedImages.push(filename);
           URL.revokeObjectURL(upload.preview);
         }
@@ -696,7 +700,7 @@ export function getActualMessageId(id) {
  * @description Handle creating a temporary message when offline.
  * Creates a local temporary message that will be visible in the UI.
  */
-export async function handleOfflineMessageCreation(endpoint, data) {
+export async function handleOfflineMessageCreation(_endpoint, data) {
   const tempId = `temp-${Date.now()}`;
 
   const tempMessage = {

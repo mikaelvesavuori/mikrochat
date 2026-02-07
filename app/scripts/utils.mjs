@@ -35,7 +35,6 @@ export function isValidEmail(email) {
   // Check if email is provided and is a string
   if (!email || typeof email !== 'string') return false;
 
-  // biome-ignore lint/style/noParameterAssign: OK to reassign here
   email = email.trim();
 
   if (email === '') return false;

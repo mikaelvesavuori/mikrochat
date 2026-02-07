@@ -7,6 +7,7 @@ export const AUTH_MODE = 'dev'; // Options: "dev", "magic-link", "password"
 export const API_BASE_URL = 'http://localhost:3000';
 export const DEFAULT_PASSWORD = '$J2Ek<wp5Wsp+x!FsGb[';
 export const ENABLE_USER_SPECIFIC_ENCRYPTION = false;
+export const ENABLE_OAUTH = true;
 export const MAX_CONTENT_LENGTH = 1000;
 
 if (DEBUG_MODE) {
@@ -17,6 +18,10 @@ if (DEBUG_MODE) {
     {
       flag: 'ENABLE_USER_SPECIFIC_ENCRYPTION',
       setting: ENABLE_USER_SPECIFIC_ENCRYPTION
+    },
+    {
+      flag: 'ENABLE_OAUTH',
+      setting: ENABLE_OAUTH
     },
     {
       flag: 'MAX_CONTENT_LENGTH',

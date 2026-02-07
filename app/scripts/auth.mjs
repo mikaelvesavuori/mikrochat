@@ -325,7 +325,32 @@ export async function signin(email, encryptionPassword) {
     if (AUTH_MODE === 'password') {
       const password = authPasswordInput?.value;
       const confirmPassword = authPasswordConfirmInput?.value;
-      const { emailParam, tokenParam } = getUrlParams();
+      const { emailParam, tokenParam, resetParam } = getUrlParams();
+
+      // Forgot password flow: user is requesting a reset email
+      if (
+        authPasswordInput &&
+        authPasswordInput.offsetParent === null &&
+        !emailParam &&
+        !tokenParam
+      ) {
+        return await handleForgotPassword(email);
+      }
+
+      // Password reset flow: URL has email+token+reset, user is setting new password
+      if (emailParam && tokenParam && resetParam) {
+        if (!password || password.length < 8) {
+          showToast('Password must be at least 8 characters', 'error');
+          hideLoading();
+          return;
+        }
+        if (password !== confirmPassword) {
+          showToast('Passwords do not match', 'error');
+          hideLoading();
+          return;
+        }
+        return await handlePasswordSetup(emailParam, tokenParam, password);
+      }
 
       // Invite setup flow: URL has email+token, user is setting password
       if (emailParam && tokenParam) {
@@ -343,7 +368,10 @@ export async function signin(email, encryptionPassword) {
       }
 
       // Registration flow: confirm password field is visible
-      if (authPasswordConfirmInput && authPasswordConfirmInput.offsetParent !== null) {
+      if (
+        authPasswordConfirmInput &&
+        authPasswordConfirmInput.offsetParent !== null
+      ) {
         if (!password || password.length < 8) {
           showToast('Password must be at least 8 characters', 'error');
           hideLoading();
@@ -455,4 +483,19 @@ export async function handlePasswordRegister(email, password) {
   await saveTokens(response);
   showToast('Account created successfully!');
   return await showAppScreen();
+}
+
+/**
+ * @description Handle forgot password: request a password reset email.
+ */
+export async function handleForgotPassword(email) {
+  const { apiRequest } = await import('./api.mjs');
+  const { hideLoading, renderPasswordResetSent } = await import('./ui.mjs');
+
+  const response = await apiRequest('/auth/request-password-reset', 'POST', {
+    email
+  });
+
+  hideLoading();
+  renderPasswordResetSent(response.message);
 }

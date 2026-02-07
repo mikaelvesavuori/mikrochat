@@ -170,7 +170,7 @@ export async function updateThreadReply(replyId, content) {
 
 function getOrCreateThreadPanel() {
   let panel = document.getElementById('thread-panel');
-  if (panel && panel.dataset.initialized) return panel;
+  if (panel?.dataset.initialized) return panel;
 
   if (!panel) {
     panel = document.createElement('div');
@@ -247,9 +247,7 @@ function renderThreadHeader(parentMessage) {
   const threadParent = document.getElementById('thread-parent');
   if (!threadParent || !parentMessage) return;
 
-  const initials = getInitials(
-    parentMessage.author?.userName || 'Unknown'
-  );
+  const initials = getInitials(parentMessage.author?.userName || 'Unknown');
   const time = formatMessageTime(
     parentMessage.timestamp || parentMessage.createdAt
   );
@@ -354,9 +352,7 @@ export function updateThreadReplyInView(reply) {
   if (!state.threadPanelOpen || state.currentThreadId !== reply.threadId)
     return;
 
-  const existingEl = document.querySelector(
-    `[data-reply-id="${reply.id}"]`
-  );
+  const existingEl = document.querySelector(`[data-reply-id="${reply.id}"]`);
   if (!existingEl) return;
 
   const html = renderThreadReply(reply);

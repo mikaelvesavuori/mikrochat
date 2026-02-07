@@ -45,7 +45,7 @@
     "build:cjs": "node esbuild.config.mjs --cjs",
     "move:webapp:files": "cp -R icons dist && cp app/mikrosafe.min.js dist && cp app/manifest.json dist && cp app/offline.html dist && cp app/pwa.js dist && cp app/service-worker.js dist",
     "clean": "rm -rf lib && rm -rf dist && mkdir lib",
-    "lint": "npx @biomejs/biome check --write ./src",
+    "lint": "npx @biomejs/biome check --write ./src ./app",
     "package": "npm pack",
     "prepublishOnly": "npm run build",
     "prepare": "husky"

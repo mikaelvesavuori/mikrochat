@@ -40,7 +40,8 @@ async function start() {
     chat,
     devMode: config.devMode,
     isInviteRequired: config.auth.isInviteRequired,
-    authMode: config.auth.authMode || 'magic-link'
+    authMode: config.auth.authMode || 'magic-link',
+    oauth: config.oauth
   });
 }
 

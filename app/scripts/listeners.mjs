@@ -8,6 +8,7 @@ import {
   addEmailInput,
   addUserButton,
   addChannelButton,
+  authForgotPasswordLink,
   channelNameInput,
   closeChannelModal,
   closeEditChannelModalEl,
@@ -79,7 +80,7 @@ import {
 } from './ui.mjs';
 import { apiRequest } from './api.mjs';
 import { openStartDmModal, closeStartDmModalFn } from './conversations.mjs';
-import { sendDMMessage, deleteDMMessage, updateDMMessage } from './dmMessages.mjs';
+import { deleteDMMessage, updateDMMessage } from './dmMessages.mjs';
 import { hasUserReactedWithEmoji } from './utils.mjs';
 
 /**
@@ -91,7 +92,8 @@ export function initializeListeners() {
 
   // Window events
   window.addEventListener('online', async () => {
-    if (state.currentChannelId) await setupMessageEvents(state.currentChannelId);
+    if (state.currentChannelId)
+      await setupMessageEvents(state.currentChannelId);
   });
 
   window.addEventListener('DOMContentLoaded', async () => {
@@ -150,6 +152,12 @@ export function initializeListeners() {
   });
 
   logoutButton?.addEventListener('click', () => signout());
+
+  authForgotPasswordLink?.addEventListener('click', async (event) => {
+    event.preventDefault();
+    const { renderForgotPasswordView } = await import('./ui.mjs');
+    renderForgotPasswordView();
+  });
 
   emailInput?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
@@ -318,7 +326,8 @@ export function initializeListeners() {
     if (editBtn) {
       const messageId = editBtn.dataset.messageId;
       const messageEl = event.target.closest('.message');
-      const content = messageEl?.querySelector('.message-text')?.textContent || '';
+      const content =
+        messageEl?.querySelector('.message-text')?.textContent || '';
       const images = [];
       messageEl?.querySelectorAll('.message-image').forEach((img) => {
         if (img.dataset.image) images.push(img.dataset.image);
@@ -332,7 +341,9 @@ export function initializeListeners() {
     }
 
     // DM message delete button
-    const deleteBtn = event.target.closest('.message-delete[data-is-dm="true"]');
+    const deleteBtn = event.target.closest(
+      '.message-delete[data-is-dm="true"]'
+    );
     if (deleteBtn) {
       const messageId = deleteBtn.dataset.messageId;
       if (confirm('Are you sure you want to delete this message?')) {
@@ -342,7 +353,9 @@ export function initializeListeners() {
     }
 
     // DM add reaction button
-    const addReactionBtn = event.target.closest('.add-reaction[data-message-id]');
+    const addReactionBtn = event.target.closest(
+      '.add-reaction[data-message-id]'
+    );
     if (addReactionBtn) {
       const messageId = addReactionBtn.dataset.messageId;
       state.currentMessageForReaction = messageId;
@@ -366,7 +379,9 @@ export function initializeListeners() {
     }
 
     // DM image removal button
-    const removeImageBtn = event.target.closest('.remove-image-btn[data-message-id]');
+    const removeImageBtn = event.target.closest(
+      '.remove-image-btn[data-message-id]'
+    );
     if (removeImageBtn) {
       event.stopPropagation();
       const messageId = removeImageBtn.dataset.messageId;
@@ -379,7 +394,8 @@ export function initializeListeners() {
             currentImages.push(img.dataset.image);
           }
         });
-        const content = messageEl?.querySelector('.message-text')?.textContent || '';
+        const content =
+          messageEl?.querySelector('.message-text')?.textContent || '';
         await updateDMMessage(messageId, content, currentImages);
       }
       return;

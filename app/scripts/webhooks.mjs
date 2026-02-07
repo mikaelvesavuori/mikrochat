@@ -6,7 +6,9 @@ import { showToast, showLoading, hideLoading } from './ui.mjs';
  */
 export async function loadWebhooks() {
   const webhooksList = document.getElementById('webhooks-list');
-  const webhookChannelSelect = document.getElementById('webhook-channel-select');
+  const webhookChannelSelect = document.getElementById(
+    'webhook-channel-select'
+  );
   if (!webhooksList || !webhookChannelSelect) return;
 
   try {

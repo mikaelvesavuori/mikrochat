@@ -43,7 +43,8 @@ export async function loadDMMessagesForConversation(conversationId, before) {
   } catch (error) {
     console.error('Failed to load DM messages:', error);
     if (!before) {
-      messagesArea.innerHTML = '<div class="empty-state"><div class="empty-state-icon">!</div><h3>Failed to load messages</h3></div>';
+      messagesArea.innerHTML =
+        '<div class="empty-state"><div class="empty-state-icon">!</div><h3>Failed to load messages</h3></div>';
     }
   }
 }
@@ -183,7 +184,7 @@ export function renderDMMessage(message) {
   }
 
   // Render reactions
-  let reactionsHtml = renderDMReactions(message);
+  const reactionsHtml = renderDMReactions(message);
 
   // Actions (edit/delete for own messages)
   let actionsHtml = '';
@@ -243,7 +244,9 @@ function renderDMReactions(message) {
   let html = '<div class="message-reactions">';
 
   for (const [emoji, count] of Object.entries(reactionCounts)) {
-    const hasUserReacted = userReactionMap[emoji].includes(state.currentUser?.id);
+    const hasUserReacted = userReactionMap[emoji].includes(
+      state.currentUser?.id
+    );
     html += `
       <div class="reaction ${hasUserReacted ? 'user-reacted' : ''}"
            data-message-id="${message.id}"
@@ -281,7 +284,9 @@ export async function sendDMMessage(content, images = []) {
 
     // Clear pending uploads
     state.pendingUploads = [];
-    const pendingContainer = document.getElementById('pending-uploads-container');
+    const pendingContainer = document.getElementById(
+      'pending-uploads-container'
+    );
     const pendingUploads = document.getElementById('pending-uploads');
     if (pendingContainer) pendingContainer.style.display = 'none';
     if (pendingUploads) pendingUploads.innerHTML = '';
@@ -384,12 +389,18 @@ export async function updateDMMessage(messageId, content, images) {
  * @description Append a new DM message to the view (from SSE).
  */
 export function appendDMMessage(message) {
-  if (!messagesArea || state.viewMode !== 'dm' || state.currentConversationId !== message.channelId) {
+  if (
+    !messagesArea ||
+    state.viewMode !== 'dm' ||
+    state.currentConversationId !== message.channelId
+  ) {
     return;
   }
 
   // Check if this message already exists
-  const existingEl = messagesArea.querySelector(`[data-message-id="${message.id}"]`);
+  const existingEl = messagesArea.querySelector(
+    `[data-message-id="${message.id}"]`
+  );
   if (existingEl) return;
 
   // Add to cache
@@ -405,7 +416,9 @@ export function appendDMMessage(message) {
 
   // Check if we need to add a date divider
   const today = formatDateKey(new Date());
-  const lastDivider = messagesArea.querySelector('.message-date-divider:last-of-type');
+  const lastDivider = messagesArea.querySelector(
+    '.message-date-divider:last-of-type'
+  );
   if (!lastDivider || lastDivider.textContent !== today) {
     const divider = document.createElement('div');
     divider.className = 'message-date-divider';
@@ -429,11 +442,17 @@ export function appendDMMessage(message) {
  * @description Update a DM message in the view (from SSE).
  */
 export function updateDMMessageInView(message) {
-  if (!messagesArea || state.viewMode !== 'dm' || state.currentConversationId !== message.channelId) {
+  if (
+    !messagesArea ||
+    state.viewMode !== 'dm' ||
+    state.currentConversationId !== message.channelId
+  ) {
     return;
   }
 
-  const existingEl = messagesArea.querySelector(`[data-message-id="${message.id}"]`);
+  const existingEl = messagesArea.querySelector(
+    `[data-message-id="${message.id}"]`
+  );
   if (!existingEl) return;
 
   // Update cache
@@ -457,11 +476,17 @@ export function updateDMMessageInView(message) {
  * @description Remove a DM message from the view (from SSE).
  */
 export function removeDMMessageFromView(messageId, conversationId) {
-  if (!messagesArea || state.viewMode !== 'dm' || state.currentConversationId !== conversationId) {
+  if (
+    !messagesArea ||
+    state.viewMode !== 'dm' ||
+    state.currentConversationId !== conversationId
+  ) {
     return;
   }
 
-  const existingEl = messagesArea.querySelector(`[data-message-id="${messageId}"]`);
+  const existingEl = messagesArea.querySelector(
+    `[data-message-id="${messageId}"]`
+  );
   if (existingEl) {
     existingEl.remove();
   }

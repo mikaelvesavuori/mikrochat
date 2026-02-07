@@ -769,6 +769,63 @@ describe('MikroChat', () => {
       });
     });
 
+    describe('password reset (overwrite existing password)', () => {
+      it('should allow overwriting an existing password', async () => {
+        const user = await chat.addUser('reset@test.com', 'admin-user-id');
+        await chat.setUserPassword(user.id, 'oldpassword123');
+
+        // Verify old password works
+        const result = await chat.verifyUserPassword(
+          'reset@test.com',
+          'oldpassword123'
+        );
+        expect(result.email).toBe('reset@test.com');
+
+        // Overwrite with new password
+        await chat.setUserPassword(user.id, 'newpassword456');
+
+        // New password should work
+        const result2 = await chat.verifyUserPassword(
+          'reset@test.com',
+          'newpassword456'
+        );
+        expect(result2.email).toBe('reset@test.com');
+      });
+
+      it('should reject old password after reset', async () => {
+        const user = await chat.addUser('resetold@test.com', 'admin-user-id');
+        await chat.setUserPassword(user.id, 'oldpassword123');
+        await chat.setUserPassword(user.id, 'newpassword456');
+
+        await expect(
+          chat.verifyUserPassword('resetold@test.com', 'oldpassword123')
+        ).rejects.toThrow('Invalid credentials');
+      });
+
+      it('should produce a different hash when resetting to the same password', async () => {
+        const user = await chat.addUser('resame@test.com', 'admin-user-id');
+        await chat.setUserPassword(user.id, 'samepassword');
+
+        const u1 = await chat.getUserById(user.id);
+        const hash1 = u1?.passwordHash;
+
+        await chat.setUserPassword(user.id, 'samepassword');
+
+        const u2 = await chat.getUserById(user.id);
+        const hash2 = u2?.passwordHash;
+
+        // Different salts should produce different hashes
+        expect(hash1).not.toBe(hash2);
+
+        // But both should still verify
+        const result = await chat.verifyUserPassword(
+          'resame@test.com',
+          'samepassword'
+        );
+        expect(result.email).toBe('resame@test.com');
+      });
+    });
+
     describe('sanitizeUser', () => {
       it('should strip passwordHash from user object', () => {
         const user = {

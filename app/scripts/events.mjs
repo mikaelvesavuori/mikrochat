@@ -1,12 +1,29 @@
 import { state } from './state.mjs';
 import { API_BASE_URL, DEBUG_MODE } from './config.mjs';
 import { getAccessToken, signout } from './auth.mjs';
-import { showToast, renderChannelItem, updateDocumentTitle, showDesktopNotification } from './ui.mjs';
-import { appendMessage, updateMessageInUI, removeMessageFromUI } from './messages.mjs';
+import {
+  showToast,
+  renderChannelItem,
+  updateDocumentTitle,
+  showDesktopNotification
+} from './ui.mjs';
+import {
+  appendMessage,
+  updateMessageInUI,
+  removeMessageFromUI
+} from './messages.mjs';
 import { updateReactionInUI } from './reactions.mjs';
 import { loadChannels } from './channels.mjs';
-import { loadConversations, updateConversationInCache, incrementDmUnread } from './conversations.mjs';
-import { appendDMMessage, updateDMMessageInView, removeDMMessageFromView } from './dmMessages.mjs';
+import {
+  loadConversations,
+  updateConversationInCache,
+  incrementDmUnread
+} from './conversations.mjs';
+import {
+  appendDMMessage,
+  updateDMMessageInView,
+  removeDMMessageFromView
+} from './dmMessages.mjs';
 
 // Event-specific globals
 const MAX_SSE_RECONNECT_ATTEMPTS = 5;
@@ -87,7 +104,10 @@ export async function setupMessageEvents(channelId) {
                 : 'another channel';
               showToast(`${authorName} posted in #${channelName}`, 'info');
               updateDocumentTitle();
-              showDesktopNotification(`#${channelName}`, `${authorName}: ${data.payload.content}`);
+              showDesktopNotification(
+                `#${channelName}`,
+                `${authorName}: ${data.payload.content}`
+              );
             }
             break;
 
@@ -168,7 +188,10 @@ export async function setupMessageEvents(channelId) {
           case 'NEW_DM_MESSAGE':
             // If this DM is for a conversation the user is part of
             if (data.payload.channelId.startsWith('dm:')) {
-              if (state.viewMode === 'dm' && data.payload.channelId === state.currentConversationId) {
+              if (
+                state.viewMode === 'dm' &&
+                data.payload.channelId === state.currentConversationId
+              ) {
                 // User is viewing this conversation - append the message
                 appendDMMessage(data.payload);
               } else {
@@ -179,7 +202,10 @@ export async function setupMessageEvents(channelId) {
                 const authorName = data.payload.author?.userName || 'Someone';
                 showToast(`${authorName} sent you a direct message`, 'info');
                 updateDocumentTitle();
-                showDesktopNotification('Direct Message', `${authorName}: ${data.payload.content}`);
+                showDesktopNotification(
+                  'Direct Message',
+                  `${authorName}: ${data.payload.content}`
+                );
               }
 
               // Update conversation's lastMessageAt
@@ -199,23 +225,35 @@ export async function setupMessageEvents(channelId) {
 
           case 'DELETE_DM_MESSAGE':
             if (data.payload.conversationId) {
-              removeDMMessageFromView(data.payload.id, data.payload.conversationId);
+              removeDMMessageFromView(
+                data.payload.id,
+                data.payload.conversationId
+              );
             }
             break;
 
           case 'NEW_THREAD_REPLY': {
-            const { appendThreadReply, updateThreadBadge } = await import('./threads.mjs');
+            const { appendThreadReply, updateThreadBadge } = await import(
+              './threads.mjs'
+            );
 
             if (data.payload.channelId === state.currentChannelId) {
-              updateThreadBadge(data.payload.parentMessageId, data.payload.threadMeta);
+              updateThreadBadge(
+                data.payload.parentMessageId,
+                data.payload.threadMeta
+              );
             }
 
             appendThreadReply(data.payload.reply);
 
             if (data.payload.reply.author.id !== state.currentUser.id) {
-              const authorName = data.payload.reply.author?.userName || 'Someone';
+              const authorName =
+                data.payload.reply.author?.userName || 'Someone';
               showToast(`${authorName} replied in a thread`, 'info');
-              showDesktopNotification('Thread Reply', `${authorName}: ${data.payload.reply.content}`);
+              showDesktopNotification(
+                'Thread Reply',
+                `${authorName}: ${data.payload.reply.content}`
+              );
             }
             break;
           }
@@ -227,7 +265,10 @@ export async function setupMessageEvents(channelId) {
           }
 
           case 'DELETE_THREAD_REPLY': {
-            const { removeThreadReplyFromView, updateThreadBadge: updateBadge } = await import('./threads.mjs');
+            const {
+              removeThreadReplyFromView,
+              updateThreadBadge: updateBadge
+            } = await import('./threads.mjs');
 
             if (data.payload.channelId === state.currentChannelId) {
               updateBadge(data.payload.threadId, data.payload.threadMeta);
@@ -239,7 +280,11 @@ export async function setupMessageEvents(channelId) {
 
           case 'NEW_WEBHOOK':
           case 'DELETE_WEBHOOK': {
-            if (document.getElementById('server-settings-modal')?.classList.contains('active')) {
+            if (
+              document
+                .getElementById('server-settings-modal')
+                ?.classList.contains('active')
+            ) {
               const { loadWebhooks } = await import('./webhooks.mjs');
               loadWebhooks();
             }
