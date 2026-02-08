@@ -10,7 +10,7 @@ MikroChat is a minimalistic, self-hosted chat application for teams who want com
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-—-
+![Example view inside MikroChat](./readme/mikrochat-example.png)
 
 ## Features
 
@@ -26,8 +26,6 @@ MikroChat is a minimalistic, self-hosted chat application for teams who want com
 - **Flexible auth** — dev mode, magic link, password, or OAuth 2.0 (email config only needed for magic link)
 - **Webhooks** — let external services post messages to channels
 - **Lightweight** — minimal dependencies, single-file deployable backend
-
-![Example view inside MikroChat](./readme/mikrochat-example.png)
 
 ## Quick Start
 

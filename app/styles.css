@@ -119,6 +119,7 @@ body {
   background-color: var(--bg-primary);
   color: var(--text);
   height: 100vh;
+  height: 100dvh;
   line-height: 1.6;
   overflow: hidden;
 }
@@ -150,6 +151,7 @@ noscript div.message {
 /* Layout Components */
 .app-container {
   height: 100vh;
+  height: 100dvh;
   display: none;
 }
 
@@ -166,6 +168,7 @@ noscript div.message {
   flex-direction: column;
   flex: 1;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   position: relative;
   overflow: hidden;
@@ -1514,6 +1517,9 @@ input[type="password"]:focus {
     position: fixed;
     top: 0;
     left: -100%;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
   }
 
   .sidebar.open {
@@ -1522,6 +1528,106 @@ input[type="password"]:focus {
 
   .menu-toggle {
     display: block;
+  }
+
+  .header {
+    padding-left: calc(var(--space-s) + env(safe-area-inset-left));
+    padding-right: calc(var(--space-s) + env(safe-area-inset-right));
+  }
+
+  .input-area {
+    padding: var(--space-s) calc(var(--space-s) + env(safe-area-inset-right))
+      calc(var(--space-s) + env(safe-area-inset-bottom))
+      calc(var(--space-s) + env(safe-area-inset-left));
+  }
+
+  .messages-area {
+    padding: var(--space-s);
+  }
+
+  .message-input {
+    padding: 0.75rem 2.5rem 0.75rem 2.25rem;
+    font-size: var(--font-size-s);
+  }
+
+  .message-attachments {
+    bottom: 0.65rem;
+    left: 0.5rem;
+  }
+
+  .send-button {
+    bottom: 0.65rem;
+    right: 0.5rem;
+  }
+
+  .message-avatar {
+    width: var(--avatar-size-s);
+    height: var(--avatar-size-s);
+    font-size: var(--font-size-xs);
+  }
+
+  .message {
+    gap: var(--space-s);
+  }
+
+  .message-author {
+    font-size: var(--font-size-s);
+  }
+
+  .message-text {
+    font-size: var(--font-size-s);
+  }
+
+  .header h2 {
+    font-size: var(--font-size-m);
+  }
+
+  .user-name {
+    display: none;
+  }
+
+  .modal {
+    max-width: calc(100vw - 2rem);
+    margin: var(--space-l);
+    padding: var(--space-l);
+  }
+
+  .toast {
+    left: var(--space-l);
+    right: var(--space-l);
+    top: calc(var(--space-l) + env(safe-area-inset-top));
+  }
+
+  .auth-container {
+    margin: 2rem var(--space-l) var(--space-l);
+    padding: var(--space-l);
+    max-width: none;
+  }
+
+  .auth-logo {
+    margin-bottom: var(--space-l);
+  }
+
+  .auth-form h2 {
+    font-size: var(--font-size-l);
+    margin-bottom: var(--space-m);
+  }
+
+  .auth-form p {
+    margin-bottom: var(--space-l);
+    font-size: var(--font-size-s);
+  }
+
+  .form-group {
+    margin-bottom: var(--space-m);
+  }
+
+  .offline-bar {
+    padding-top: calc(var(--space-xs) + env(safe-area-inset-top));
+  }
+
+  .message-image-container {
+    max-width: 100%;
   }
 }
 
@@ -1532,8 +1638,82 @@ input[type="password"]:focus {
   }
 
   .auth-container {
-    margin-left: 1rem;
-    margin-right: 1rem;
+    margin-top: var(--space-xl);
+    margin-left: var(--space-m);
+    margin-right: var(--space-m);
+    padding: var(--space-l);
+  }
+
+  .auth-logo {
+    font-size: var(--font-size-l);
+    margin-bottom: var(--space-m);
+  }
+}
+
+/* Very small phones (iPhone SE, older iPhones at 320px) */
+@media (width < 375px) {
+  :root {
+    --font-size-xs: 0.7rem;
+    --font-size-s: 0.8rem;
+    --font-size-m: 0.875rem;
+    --font-size-l: 1.05rem;
+    --header-height: 3rem;
+    --input-height: 2.75rem;
+    --avatar-size-s: 1.75rem;
+    --avatar-size-m: 2rem;
+  }
+
+  .auth-container {
+    margin-top: var(--space-l);
+    margin-left: var(--space-s);
+    margin-right: var(--space-s);
+    padding: var(--space-m);
+  }
+
+  .auth-form h2 {
+    font-size: var(--font-size-m);
+  }
+
+  .message-input {
+    padding: 0.6rem 2.25rem 0.6rem 2rem;
+  }
+
+  .input-area {
+    padding: var(--space-xs) calc(var(--space-xs) + env(safe-area-inset-right))
+      calc(var(--space-xs) + env(safe-area-inset-bottom))
+      calc(var(--space-xs) + env(safe-area-inset-left));
+  }
+
+  .messages-area {
+    padding: var(--space-xs);
+  }
+
+  .modal {
+    margin: var(--space-s);
+    padding: var(--space-m);
+    max-width: calc(100vw - 1rem);
+  }
+
+  .modal-header {
+    margin-bottom: var(--space-m);
+  }
+
+  .channels-header,
+  .dm-header {
+    padding: var(--space-m);
+  }
+
+  .server-name {
+    padding: 0 var(--space-m);
+  }
+
+  .reaction-picker {
+    gap: var(--space-xs);
+  }
+
+  .reaction-item {
+    width: 1.75rem;
+    height: 1.75rem;
   }
 }
 
@@ -1545,6 +1725,7 @@ input[type="password"]:focus {
   border-left: var(--border-width) solid var(--border-color);
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   background: var(--bg-primary);
   flex-shrink: 0;
 }
@@ -1676,6 +1857,17 @@ input[type="password"]:focus {
     bottom: 0;
     width: 100%;
     z-index: 100;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .thread-input-area {
+    padding-bottom: calc(var(--space-m) + env(safe-area-inset-bottom));
+  }
+
+  .thread-input-area .message-input {
+    min-height: 36px;
+    font-size: var(--font-size-s);
   }
 }
 
