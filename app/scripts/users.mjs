@@ -5,13 +5,12 @@ import { showToast, showLoading, hideLoading } from './ui.mjs';
 import { getInitials, formatTime } from './utils.mjs';
 import { AUTH_MODE, HAS_EMAIL } from './config.mjs';
 
-const showPasswordControls = AUTH_MODE === 'password' && !HAS_EMAIL;
-
 /**
  * @description Get all users on the server.
  */
 export async function loadUsers() {
   try {
+    const showPasswordControls = AUTH_MODE === 'password' && !HAS_EMAIL;
     if (showPasswordControls && addUserPasswordGroup)
       addUserPasswordGroup.style.display = 'block';
 

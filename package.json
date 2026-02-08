@@ -41,7 +41,7 @@
     "build": "npm run clean && npm run build:web && npm run build:api",
     "build:api": "node esbuild.config.mjs",
     "build:web": "rm -rf dist && mkdir dist && node build.mjs && npm run move:webapp:files",
-    "move:webapp:files": "cp -R icons dist && cp app/mikrosafe.min.js dist && cp app/manifest.json dist && cp app/offline.html dist && cp app/pwa.js dist && cp app/service-worker.js dist",
+    "move:webapp:files": "cp -R icons dist && cp app/config.js dist && cp app/mikrosafe.min.js dist && cp app/manifest.json dist && cp app/offline.html dist && cp app/pwa.js dist && cp app/service-worker.js dist",
     "clean": "rm -rf lib && rm -rf dist && mkdir lib",
     "lint": "npx @biomejs/biome check --write ./src ./app",
     "licenses": "npx license-checker-rseidelsohn --production --plainVertical --excludePackagesStartingWith \"molnos;esbuild;@esbuild\" --out oss-licenses.txt",
