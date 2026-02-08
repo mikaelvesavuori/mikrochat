@@ -134,6 +134,19 @@ describe('MikroChat', () => {
         ).rejects.toThrow('Only administrators can remove users');
       });
 
+      it('should throw error when user to remove does not exist', async () => {
+        await expect(
+          chat.removeUser('nonexistent', 'admin-user-id')
+        ).rejects.toThrow('User not found');
+      });
+
+      it('should throw error when requester does not exist', async () => {
+        const user = await chat.addUser('target@test.com', 'admin-user-id');
+        await expect(
+          chat.removeUser(user.id, 'nonexistent')
+        ).rejects.toThrow('Requester not found');
+      });
+
       it('should throw error when removing last admin', async () => {
         await expect(
           chat.removeUser('admin-user-id', 'admin-user-id')
@@ -196,6 +209,72 @@ describe('MikroChat', () => {
         await chat.addUser('user2@test.com', 'admin-user-id');
         const users = await chat.listUsers();
         expect(users.length).toBe(3); // admin + 2 new users
+      });
+    });
+
+    describe('updateUserName', () => {
+      it('should update a user display name', async () => {
+        const user = await chat.addUser('rename@test.com', 'admin-user-id');
+        const updated = await chat.updateUserName(user.id, 'new-name');
+        expect(updated.userName).toBe('new-name');
+      });
+
+      it('should trim whitespace from the new name', async () => {
+        const user = await chat.addUser('trim@test.com', 'admin-user-id');
+        const updated = await chat.updateUserName(user.id, '  trimmed  ');
+        expect(updated.userName).toBe('trimmed');
+      });
+
+      it('should throw error for empty name', async () => {
+        const user = await chat.addUser('empty@test.com', 'admin-user-id');
+        await expect(chat.updateUserName(user.id, '')).rejects.toThrow(
+          'User name cannot be empty'
+        );
+      });
+
+      it('should throw error for whitespace-only name', async () => {
+        const user = await chat.addUser('spaces@test.com', 'admin-user-id');
+        await expect(chat.updateUserName(user.id, '   ')).rejects.toThrow(
+          'User name cannot be empty'
+        );
+      });
+
+      it('should throw error for non-existent user', async () => {
+        await expect(
+          chat.updateUserName('nonexistent', 'new-name')
+        ).rejects.toThrow('User not found');
+      });
+
+      it('should throw error when username is already taken', async () => {
+        const user1 = await chat.addUser('taken1@test.com', 'admin-user-id');
+        const user2 = await chat.addUser('taken2@test.com', 'admin-user-id');
+        await chat.updateUserName(user1.id, 'taken-name');
+
+        await expect(
+          chat.updateUserName(user2.id, 'taken-name')
+        ).rejects.toThrow('User name is already taken');
+      });
+
+      it('should allow a user to keep their own name', async () => {
+        const user = await chat.addUser('keep@test.com', 'admin-user-id');
+        await chat.updateUserName(user.id, 'my-name');
+        const updated = await chat.updateUserName(user.id, 'my-name');
+        expect(updated.userName).toBe('my-name');
+      });
+
+      it('should emit UPDATE_USER event', async () => {
+        const events: ServerSentEvent[] = [];
+        chat.subscribeToEvents((event) => events.push(event));
+
+        const user = await chat.addUser('event@test.com', 'admin-user-id');
+        await chat.updateUserName(user.id, 'renamed');
+
+        const updateEvent = events.find((e) => e.type === 'UPDATE_USER');
+        expect(updateEvent).toBeDefined();
+        expect(updateEvent?.payload).toMatchObject({
+          id: user.id,
+          userName: 'renamed'
+        });
       });
     });
   });
@@ -265,6 +344,19 @@ describe('MikroChat', () => {
         ).rejects.toThrow('You can only edit channels you created');
       });
 
+      it('should throw error for non-existent channel', async () => {
+        await expect(
+          chat.updateChannel('nonexistent', 'new-name', 'admin-user-id')
+        ).rejects.toThrow('Channel not found');
+      });
+
+      it('should throw error for non-existent user', async () => {
+        const channel = await chat.createChannel('ch-test', 'admin-user-id');
+        await expect(
+          chat.updateChannel(channel.id, 'new-name', 'nonexistent')
+        ).rejects.toThrow('User not found');
+      });
+
       it('should not allow renaming the General channel', async () => {
         const channels = await chat.listChannels();
         const general = channels.find((c) => c.name === 'General');
@@ -318,6 +410,19 @@ describe('MikroChat', () => {
 
         const messages = await chat.getMessagesByChannel(channel.id);
         expect(messages.length).toBe(0);
+      });
+
+      it('should throw error for non-existent channel', async () => {
+        await expect(
+          chat.deleteChannel('nonexistent', 'admin-user-id')
+        ).rejects.toThrow('Channel not found');
+      });
+
+      it('should throw error for non-existent user', async () => {
+        const channel = await chat.createChannel('del-test', 'admin-user-id');
+        await expect(
+          chat.deleteChannel(channel.id, 'nonexistent')
+        ).rejects.toThrow('User not found');
       });
 
       it('should not allow deleting the General channel', async () => {
@@ -537,6 +642,23 @@ describe('MikroChat', () => {
         await chat.deleteMessage(message.id, 'admin-user-id');
         const deleted = await chat.getMessageById(message.id);
         expect(deleted).toBeNull();
+      });
+
+      it('should throw error for non-existent message', async () => {
+        await expect(
+          chat.deleteMessage('nonexistent', 'admin-user-id')
+        ).rejects.toThrow('Message not found');
+      });
+
+      it('should throw error for non-existent user', async () => {
+        const message = await chat.createMessage(
+          'test',
+          'admin-user-id',
+          testChannelId
+        );
+        await expect(
+          chat.deleteMessage(message.id, 'nonexistent')
+        ).rejects.toThrow('User not found');
       });
 
       it('should throw error when non-author/non-admin tries to delete', async () => {
@@ -870,6 +992,19 @@ describe('MikroChat', () => {
       await chat.updateServerSettings({ name: 'Updated Name' });
       const settings = await chat.getServerSettings();
       expect(settings?.name).toBe('Updated Name');
+    });
+
+    it('should emit UPDATE_SERVER_SETTINGS event', async () => {
+      const events: ServerSentEvent[] = [];
+      chat.subscribeToEvents((event) => events.push(event));
+
+      await chat.updateServerSettings({ name: 'Event Test' });
+
+      const settingsEvent = events.find(
+        (e) => e.type === 'UPDATE_SERVER_SETTINGS'
+      );
+      expect(settingsEvent).toBeDefined();
+      expect(settingsEvent?.payload).toMatchObject({ name: 'Event Test' });
     });
   });
 

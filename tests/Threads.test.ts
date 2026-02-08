@@ -181,6 +181,18 @@ describe('MikroChat Threads', () => {
       expect(updated.content).toBe('Updated');
     });
 
+    it('should throw error when message is not a thread reply', async () => {
+      await expect(
+        chat.updateThreadReply(parentMessage.id, adminUser.id, 'Updated')
+      ).rejects.toThrow('Message is not a thread reply');
+    });
+
+    it('should throw error for non-existent message', async () => {
+      await expect(
+        chat.updateThreadReply('nonexistent', adminUser.id, 'Updated')
+      ).rejects.toThrow('Message not found');
+    });
+
     it('should not allow updating another users reply', async () => {
       const { reply } = await chat.createThreadReply(
         'My reply',
@@ -249,6 +261,30 @@ describe('MikroChat Threads', () => {
 
       const deleted = await chat.getMessageById(reply.id);
       expect(deleted).toBeNull();
+    });
+
+    it('should throw error when message is not a thread reply', async () => {
+      await expect(
+        chat.deleteThreadReply(parentMessage.id, adminUser.id)
+      ).rejects.toThrow('Message is not a thread reply');
+    });
+
+    it('should throw error for non-existent message', async () => {
+      await expect(
+        chat.deleteThreadReply('nonexistent', adminUser.id)
+      ).rejects.toThrow('Message not found');
+    });
+
+    it('should throw error for non-existent user', async () => {
+      const { reply } = await chat.createThreadReply(
+        'Reply',
+        adminUser.id,
+        parentMessage.id
+      );
+
+      await expect(
+        chat.deleteThreadReply(reply.id, 'nonexistent')
+      ).rejects.toThrow('User not found');
     });
 
     it('should not allow non-admin to delete another users reply', async () => {

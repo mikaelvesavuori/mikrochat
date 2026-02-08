@@ -3,11 +3,11 @@
  */
 
 export const DEBUG_MODE = true;
-export const AUTH_MODE = 'dev'; // Options: "dev", "magic-link", "password"
+export const AUTH_MODE = 'password'; // Options: "dev", "magic-link", "password"
 export const API_BASE_URL = 'http://localhost:3000';
 export const DEFAULT_PASSWORD = '$J2Ek<wp5Wsp+x!FsGb[';
 export const ENABLE_USER_SPECIFIC_ENCRYPTION = false;
-export const ENABLE_OAUTH = true;
+export const ENABLE_OAUTH = false;
 export const MAX_CONTENT_LENGTH = 1000;
 
 if (DEBUG_MODE) {

@@ -53,14 +53,32 @@ function prependDMMessages(messages) {
   if (!messagesArea || messages.length === 0) return;
   removeDMLoadMoreButton();
   const messagesByDate = groupMessagesByDate(messages);
-  let html = '';
-  for (const [date, dayMessages] of Object.entries(messagesByDate)) {
-    html += `<div class="message-date-divider">${date}</div>`;
+
+  const sortedDates = Object.keys(messagesByDate).sort((a, b) => {
+    const aTime = messagesByDate[a][0].createdAt;
+    const bTime = messagesByDate[b][0].createdAt;
+    return aTime - bTime;
+  });
+
+  for (const date of sortedDates) {
+    const dayMessages = messagesByDate[date];
+
+    const existingDivider = Array.from(
+      messagesArea.querySelectorAll('.message-date-divider')
+    ).find((div) => div.textContent === date);
+
+    if (!existingDivider) {
+      const dateDivider = document.createElement('div');
+      dateDivider.className = 'message-date-divider';
+      dateDivider.textContent = date;
+      messagesArea.appendChild(dateDivider);
+    }
+
     for (const message of dayMessages) {
-      html += renderDMMessage(message);
+      const el = createDMMessageElement(message);
+      messagesArea.appendChild(el);
     }
   }
-  messagesArea.insertAdjacentHTML('beforeend', html);
 }
 
 function showDMLoadMoreButton(conversationId, oldestId) {
@@ -85,7 +103,18 @@ function removeDMLoadMoreButton() {
 }
 
 /**
+ * @description Create a DOM element from a DM message.
+ */
+function createDMMessageElement(message) {
+  const temp = document.createElement('div');
+  temp.innerHTML = renderDMMessage(message);
+  return temp.firstElementChild;
+}
+
+/**
  * @description Render DM messages in the messages area.
+ * Uses the same prepend pattern as channel messages for correct
+ * ordering with flex-direction: column-reverse.
  */
 export function renderDMMessages(messages) {
   if (!messagesArea) return;
@@ -101,19 +130,29 @@ export function renderDMMessages(messages) {
     return;
   }
 
-  // Group messages by date
+  messagesArea.innerHTML = '';
+
   const messagesByDate = groupMessagesByDate(messages);
-  let html = '';
 
-  for (const [date, dayMessages] of Object.entries(messagesByDate)) {
-    html += `<div class="message-date-divider">${date}</div>`;
+  const sortedDates = Object.keys(messagesByDate).sort((a, b) => {
+    const aTime = messagesByDate[a][0].createdAt;
+    const bTime = messagesByDate[b][0].createdAt;
+    return bTime - aTime;
+  });
 
+  for (const date of sortedDates) {
+    const dateDivider = document.createElement('div');
+    dateDivider.className = 'message-date-divider';
+    dateDivider.textContent = date;
+    messagesArea.appendChild(dateDivider);
+
+    const dayMessages = messagesByDate[date];
     for (const message of dayMessages) {
-      html += renderDMMessage(message);
+      const el = createDMMessageElement(message);
+      messagesArea.prepend(el);
     }
   }
 
-  messagesArea.innerHTML = html;
   scrollToBottom();
 }
 
@@ -198,7 +237,7 @@ export function renderDMMessage(message) {
   }
 
   return `
-    <div class="message" data-message-id="${message.id}" data-is-dm="true">
+    <div class="message" data-id="${message.id}" data-is-dm="true">
       <div class="message-avatar">${initials}</div>
       <div class="message-content">
         <div class="message-header">
@@ -399,7 +438,7 @@ export function appendDMMessage(message) {
 
   // Check if this message already exists
   const existingEl = messagesArea.querySelector(
-    `[data-message-id="${message.id}"]`
+    `.message[data-id="${message.id}"]`
   );
   if (existingEl) return;
 
@@ -414,25 +453,18 @@ export function appendDMMessage(message) {
     messagesArea.innerHTML = '';
   }
 
-  // Check if we need to add a date divider
+  // Check if we need to add a date divider (first in DOM = newest with column-reverse)
   const today = formatDateKey(new Date());
-  const lastDivider = messagesArea.querySelector(
-    '.message-date-divider:last-of-type'
-  );
-  if (!lastDivider || lastDivider.textContent !== today) {
+  const newestDivider = messagesArea.querySelector('.message-date-divider');
+  if (!newestDivider || newestDivider.textContent !== today) {
     const divider = document.createElement('div');
     divider.className = 'message-date-divider';
     divider.textContent = today;
     messagesArea.insertBefore(divider, messagesArea.firstChild);
   }
 
-  // Insert message
-  const messageHtml = renderDMMessage(message);
-  const tempDiv = document.createElement('div');
-  tempDiv.innerHTML = messageHtml;
-  const messageEl = tempDiv.firstElementChild;
-
-  // Insert at the end (before first child due to flex-direction: column-reverse)
+  // Insert message at the visual bottom (first child due to column-reverse)
+  const messageEl = createDMMessageElement(message);
   messagesArea.insertBefore(messageEl, messagesArea.firstChild);
 
   scrollToBottom();
@@ -451,7 +483,7 @@ export function updateDMMessageInView(message) {
   }
 
   const existingEl = messagesArea.querySelector(
-    `[data-message-id="${message.id}"]`
+    `.message[data-id="${message.id}"]`
   );
   if (!existingEl) return;
 
@@ -464,12 +496,7 @@ export function updateDMMessageInView(message) {
   }
 
   // Replace message element
-  const messageHtml = renderDMMessage(message);
-  const tempDiv = document.createElement('div');
-  tempDiv.innerHTML = messageHtml;
-  const newEl = tempDiv.firstElementChild;
-
-  existingEl.replaceWith(newEl);
+  existingEl.replaceWith(createDMMessageElement(message));
 }
 
 /**
@@ -485,7 +512,7 @@ export function removeDMMessageFromView(messageId, conversationId) {
   }
 
   const existingEl = messagesArea.querySelector(
-    `[data-message-id="${messageId}"]`
+    `.message[data-id="${messageId}"]`
   );
   if (existingEl) {
     existingEl.remove();

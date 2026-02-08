@@ -17,7 +17,16 @@ export async function loadChannels() {
     for (const channel of channels) await renderChannelItem(channel);
 
     if (channels.length > 0 && !state.currentChannelId) {
-      const savedChannelId = await state.storage.getItem('currentChannelId');
+      let savedChannelId = null;
+      try {
+        savedChannelId = await state.storage.getItem('currentChannelId');
+      } catch (_e) {
+        // Fall through
+      }
+      // Fallback to localStorage if encrypted storage didn't return a value
+      if (!savedChannelId) {
+        savedChannelId = localStorage.getItem('lastChannelId');
+      }
       const channelToSelect =
         channels.find((c) => c.id === savedChannelId) || channels[0];
       await selectChannel(channelToSelect.id, channelToSelect.name);
@@ -49,6 +58,7 @@ export async function selectChannel(channelId, channelName) {
   state.currentChannelId = channelId;
   currentChannelName.textContent = channelName;
   await state.storage.setItem('currentChannelId', channelId);
+  localStorage.setItem('lastChannelId', channelId);
 
   // Reset unread count for this channel
   state.unreadCounts.set(channelId, 0);
@@ -132,7 +142,15 @@ export async function updateChannelName(channelId, name) {
  * @description Navigate to the last used channel.
  */
 export async function restoreLastChannel() {
-  const savedChannelId = await state.storage.getItem('currentChannelId');
+  let savedChannelId = null;
+  try {
+    savedChannelId = await state.storage.getItem('currentChannelId');
+  } catch (_e) {
+    // Fall through
+  }
+  if (!savedChannelId) {
+    savedChannelId = localStorage.getItem('lastChannelId');
+  }
   if (!savedChannelId) return;
 
   const channelEl = document.querySelector(

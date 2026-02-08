@@ -638,6 +638,9 @@ export function closeAllModals() {
   state.currentMessageForReaction = null;
   state.currentMessageForEdit = null;
   state.currentChannelForEdit = null;
+
+  const tokenDisplay = document.querySelector('.webhook-token-display');
+  if (tokenDisplay) tokenDisplay.remove();
 }
 
 ///////////////////////////
@@ -660,24 +663,16 @@ export function updateDocumentTitle() {
 ///////////////////////////
 
 /**
- * @description Request permission for desktop notifications.
- */
-export function requestNotificationPermission() {
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission();
-  }
-}
-
-/**
  * @description Show a desktop notification when the tab is not focused.
+ * Lazily requests permission on first use.
  */
-export function showDesktopNotification(title, body) {
-  if (
-    !('Notification' in window) ||
-    Notification.permission !== 'granted' ||
-    document.hasFocus()
-  )
-    return;
+export async function showDesktopNotification(title, body) {
+  if (!('Notification' in window) || document.hasFocus()) return;
+
+  if (Notification.permission === 'default')
+    await Notification.requestPermission();
+
+  if (Notification.permission !== 'granted') return;
 
   const notification = new Notification(title, {
     body,

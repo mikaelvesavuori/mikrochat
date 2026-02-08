@@ -31,8 +31,8 @@
   ],
   "scripts": {
     "start": "npx tsx src/index.ts",
-    "dev": "npx http-server -p 8080 ./app",
-    "dev:https": "npx http-server -p 8080 -S -C cert.pem ./app",
+    "dev": "npx http-server -p 8000 ./app",
+    "dev:https": "npx http-server -p 8000 -S -C cert.pem ./app",
     "dev:reload": "npm run build:web && mv dist/mikrochat.min.js app && clear && npm start",
     "test": "npm run lint && npm run test:unit",
     "test:unit": "npx vitest run --coverage",

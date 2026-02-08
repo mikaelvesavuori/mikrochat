@@ -86,6 +86,16 @@ export const userDropdown = document.getElementById('user-dropdown');
 export const userMenu = document.getElementById('user-menu');
 export const usersList = document.getElementById('users-list');
 export const userName = document.getElementById('user-name');
+export const userSettingsButton = document.getElementById('user-settings-btn');
+export const userSettingsModal = document.getElementById('user-settings-modal');
+export const userSettingsNameInput =
+  document.getElementById('user-settings-name');
+export const userSettingsSaveBtn = document.getElementById(
+  'user-settings-save-btn'
+);
+export const closeUserSettingsBtn = document.getElementById(
+  'close-user-settings-btn'
+);
 
 // Password auth elements
 export const authPasswordInput = document.getElementById('auth-password');

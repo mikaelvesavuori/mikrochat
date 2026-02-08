@@ -46,7 +46,11 @@ import {
   closeStartDmModal,
   addWebhookButton,
   webhookNameInput,
-  webhookChannelSelect
+  webhookChannelSelect,
+  userSettingsButton,
+  userSettingsNameInput,
+  userSettingsSaveBtn,
+  closeUserSettingsBtn
 } from './dom.mjs';
 
 import { signin, signout } from './auth.mjs';
@@ -66,7 +70,10 @@ import { addUser } from './users.mjs';
 import {
   openServerSettingsModal,
   hideServerSettingsModal,
-  updateServerName
+  updateServerName,
+  openUserSettingsModal,
+  closeUserSettingsModal,
+  updateUserName
 } from './settings.mjs';
 import {
   closeAllModals,
@@ -435,6 +442,24 @@ export function initializeListeners() {
     if (event.key === 'Enter') {
       event.preventDefault();
       updateServerNameButton.click();
+    }
+  });
+
+  // User settings listeners
+  userSettingsButton?.addEventListener('click', () => openUserSettingsModal());
+
+  closeUserSettingsBtn?.addEventListener('click', () =>
+    closeUserSettingsModal()
+  );
+
+  userSettingsSaveBtn?.addEventListener('click', async () => {
+    await updateUserName(userSettingsNameInput.value);
+  });
+
+  userSettingsNameInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      userSettingsSaveBtn.click();
     }
   });
 

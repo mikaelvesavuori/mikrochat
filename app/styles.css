@@ -1,3 +1,5 @@
+/** biome-ignore-all lint/complexity/noImportantStyles: OK */
+
 :root {
   /* Brand Colors */
   --color-primary: #5761f2;
@@ -878,12 +880,7 @@ h2#current-channel-name {
 }
 
 .message-image-container {
-  max-width: 25rem;
-  margin: 0;
-}
-
-.message-image-container {
-  max-width: 25rem;
+  max-width: 40rem;
   margin: 0.25rem 0;
 }
 
@@ -904,7 +901,7 @@ h2#current-channel-name {
   align-items: center;
   background-color: var(--transparent);
   width: auto;
-  max-width: 90vw;
+  max-width: 90vw !important;
   max-height: 90vh;
   position: relative;
   margin: 0 auto;
@@ -1660,9 +1657,10 @@ input[type="password"]:focus {
 /* Start thread / Reply button in message actions */
 .start-thread {
   cursor: pointer;
-  font-size: var(--font-size-s);
+  font-size: var(--font-size-xs);
   color: var(--color-gray);
   transition: var(--transition);
+  padding: var(--space-xxs) 0.5rem;
 }
 
 .start-thread:hover {
@@ -1695,6 +1693,10 @@ input[type="password"]:focus {
   vertical-align: middle;
 }
 
+#server-settings-modal .modal {
+  max-width: 36rem;
+}
+
 /* Webhook management */
 .webhook-item {
   display: flex;
@@ -1717,6 +1719,32 @@ input[type="password"]:focus {
   font-size: var(--font-size-s);
   color: var(--color-gray);
   margin-top: 0.15rem;
+}
+
+.webhook-url-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-s);
+  margin-top: var(--space-s);
+}
+
+.webhook-url {
+  flex: 1;
+  font-size: var(--font-size-s);
+  background-color: var(--input-bg);
+  padding: var(--space-xs) var(--space-s);
+  border-radius: var(--radius-s);
+  overflow-x: auto;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.webhook-copy-url {
+  flex-shrink: 0;
+  width: auto;
+  padding: 0 var(--space-m);
+  height: 1.75rem;
+  font-size: var(--font-size-s);
 }
 
 .webhook-actions .remove-webhook {
@@ -1754,11 +1782,13 @@ input[type="password"]:focus {
   color: var(--text);
 }
 
-.webhook-token-copy {
+.webhook-token-copy,
+.webhook-token-copy-url {
   width: auto;
   padding: 0 var(--space-l);
   height: 2rem;
   font-size: var(--font-size-s);
+  margin-bottom: var(--space-m);
 }
 
 .add-webhook-form {

@@ -49,6 +49,12 @@ describe('MikroChat Webhooks', () => {
       expect(webhook.createdBy).toBe(adminUser.id);
     });
 
+    it('should throw error for non-existent user', async () => {
+      await expect(
+        chat.createWebhook('Bot', testChannelId, 'nonexistent')
+      ).rejects.toThrow('User not found');
+    });
+
     it('should reject non-admin creating a webhook', async () => {
       await expect(
         chat.createWebhook('Bot', testChannelId, regularUser.id)
@@ -81,6 +87,24 @@ describe('MikroChat Webhooks', () => {
 
       const deleted = await chat.getWebhookById(webhook.id);
       expect(deleted).toBeNull();
+    });
+
+    it('should throw error for non-existent user', async () => {
+      const webhook = await chat.createWebhook(
+        'Bot',
+        testChannelId,
+        adminUser.id
+      );
+
+      await expect(
+        chat.deleteWebhook(webhook.id, 'nonexistent')
+      ).rejects.toThrow('User not found');
+    });
+
+    it('should throw error for non-existent webhook', async () => {
+      await expect(
+        chat.deleteWebhook('nonexistent', adminUser.id)
+      ).rejects.toThrow('Webhook not found');
     });
 
     it('should reject non-admin deleting a webhook', async () => {
@@ -117,6 +141,12 @@ describe('MikroChat Webhooks', () => {
 
       const webhooks = await chat.listWebhooks(adminUser.id);
       expect(webhooks.length).toBe(2);
+    });
+
+    it('should throw error for non-existent user', async () => {
+      await expect(chat.listWebhooks('nonexistent')).rejects.toThrow(
+        'User not found'
+      );
     });
 
     it('should reject non-admin listing webhooks', async () => {

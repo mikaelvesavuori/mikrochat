@@ -8,8 +8,7 @@ import {
   showLoading,
   hideLoading,
   showAuthScreen,
-  showAppScreen,
-  requestNotificationPermission
+  showAppScreen
 } from './ui.mjs';
 import { setupNetworkListeners } from './events.mjs';
 
@@ -24,7 +23,6 @@ export async function handleStart() {
     if (isOAuthCallback()) {
       try {
         await handleOAuthCallback();
-        requestNotificationPermission();
         showToast('Successfully logged in!');
         return await showAppScreen();
       } catch (error) {
@@ -56,7 +54,6 @@ export async function handleStart() {
     // using the default password and jump right into the app
     await initializeStorage();
 
-    requestNotificationPermission();
     setupNetworkListeners();
 
     return await showAppScreen();

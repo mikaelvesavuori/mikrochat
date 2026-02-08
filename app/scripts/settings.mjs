@@ -3,11 +3,16 @@ import {
   serverName,
   serverNameInput,
   serverSettingsModal,
-  serverNameText
+  serverNameText,
+  userAvatar,
+  userName,
+  userSettingsModal,
+  userSettingsNameInput
 } from './dom.mjs';
 import { apiRequest } from './api.mjs';
 import { showToast, showLoading, hideLoading } from './ui.mjs';
 import { loadUsers } from './users.mjs';
+import { getInitials } from './utils.mjs';
 
 /**
  * @description Open the server settings modal.
@@ -33,6 +38,8 @@ export function openServerSettingsModal() {
  */
 export function hideServerSettingsModal() {
   serverSettingsModal.classList.remove('active');
+  const tokenDisplay = document.querySelector('.webhook-token-display');
+  if (tokenDisplay) tokenDisplay.remove();
 }
 
 /**
@@ -77,4 +84,44 @@ export async function loadServerName() {
 
   const savedName = await state.storage.getItem('serverName');
   if (savedName) serverNameText.textContent = savedName;
+}
+
+/**
+ * @description Open the user settings modal.
+ */
+export function openUserSettingsModal() {
+  userSettingsNameInput.value = state.currentUser?.userName || '';
+  userSettingsModal.classList.add('active');
+  userSettingsNameInput.focus();
+}
+
+/**
+ * @description Close the user settings modal.
+ */
+export function closeUserSettingsModal() {
+  userSettingsModal.classList.remove('active');
+}
+
+/**
+ * @description Update the current user's display name.
+ */
+export async function updateUserName(newName) {
+  const trimmed = newName?.trim();
+  if (!trimmed) return showToast('Name cannot be empty', 'error');
+
+  try {
+    showLoading();
+    await apiRequest('/users/me', 'PUT', { userName: trimmed });
+
+    state.currentUser.userName = trimmed;
+    userAvatar.textContent = getInitials(trimmed);
+    userName.textContent = trimmed;
+
+    closeUserSettingsModal();
+    showToast('Display name updated');
+    hideLoading();
+  } catch (error) {
+    hideLoading();
+    showToast(error.message || 'Failed to update display name', 'error');
+  }
 }

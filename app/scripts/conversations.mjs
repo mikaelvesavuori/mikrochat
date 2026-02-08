@@ -106,9 +106,18 @@ export async function selectConversation(conversationId) {
 
   state.currentConversationId = conversationId;
 
-  // Clear unread count for this conversation
+  // Clear unread count for this conversation and re-render badge
   state.dmUnreadCounts.set(conversationId, 0);
   updateDocumentTitle();
+
+  // Re-render the DM item to remove the notification badge
+  const dmItem = document.querySelector(
+    `.dm-item[data-conversation-id="${conversationId}"]`
+  );
+  if (dmItem) {
+    const badge = dmItem.querySelector('.notification-badge');
+    if (badge) badge.remove();
+  }
 
   // Update header
   const conversation = state.conversationCache.get(conversationId);
@@ -156,6 +165,9 @@ export async function startConversation(targetUserId) {
   }
 }
 
+// Cache for DM user search
+let dmUserSearchCache = [];
+
 /**
  * @description Open the Start DM modal.
  */
@@ -164,6 +176,12 @@ export async function openStartDmModal() {
 
   startDmModal.classList.add('active');
 
+  const searchInput = document.getElementById('dm-user-search');
+  if (searchInput) {
+    searchInput.value = '';
+    searchInput.focus();
+  }
+
   // Load users
   try {
     const response = await apiRequest('/users');
@@ -171,8 +189,31 @@ export async function openStartDmModal() {
 
     // Filter out current user
     const otherUsers = users.filter((u) => u.id !== state.currentUser?.id);
+    dmUserSearchCache = otherUsers;
 
     renderDmUserSelectList(otherUsers);
+
+    // Set up search filtering
+    if (searchInput) {
+      // Remove old listener by replacing element
+      const newSearchInput = searchInput.cloneNode(true);
+      searchInput.parentNode.replaceChild(newSearchInput, searchInput);
+      newSearchInput.focus();
+
+      newSearchInput.addEventListener('input', () => {
+        const query = newSearchInput.value.trim().toLowerCase();
+        if (!query) {
+          renderDmUserSelectList(dmUserSearchCache);
+          return;
+        }
+        const filtered = dmUserSearchCache.filter(
+          (u) =>
+            (u.userName || '').toLowerCase().includes(query) ||
+            (u.email || '').toLowerCase().includes(query)
+        );
+        renderDmUserSelectList(filtered);
+      });
+    }
   } catch (error) {
     console.error('Failed to load users:', error);
     dmUserList.innerHTML = '<div class="empty-list">Failed to load users</div>';

@@ -223,7 +223,7 @@ export function generateThumbnail(blob) {
 
       let width = img.width;
       let height = img.height;
-      const maxDimension = 200;
+      const maxDimension = 400;
 
       if (width > height && width > maxDimension) {
         height = Math.round((height * maxDimension) / width);

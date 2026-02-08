@@ -82,11 +82,19 @@ export type ServerSettings = {
   config: ServerConfiguration;
   auth: MikroAuth;
   chat: MikroChat;
-  devMode: boolean;
   isInviteRequired: boolean;
-  authMode: 'magic-link' | 'password';
+  authMode: AuthMode;
+  appUrl: string;
   oauth?: OAuthConfiguration;
 };
+
+/**
+ * Authentication mode for production use.
+ * 'magic-link' sends a one-time login link via email.
+ * 'password' uses traditional email + password credentials.
+ * 'dev' mode is a simple development mode without authentication.
+ */
+export type AuthMode = 'magic-link' | 'password' | 'dev';
 
 export type ServerSentEvent =
   // Messages
@@ -117,6 +125,10 @@ export type ServerSentEvent =
     }
   | {
       type: 'USER_EXIT';
+      payload: { id: string; userName: string };
+    }
+  | {
+      type: 'UPDATE_USER';
       payload: { id: string; userName: string };
     }
   // Direct Messages / Conversations
@@ -165,6 +177,11 @@ export type ServerSentEvent =
   | {
       type: 'DELETE_WEBHOOK';
       payload: { id: string; channelId: string };
+    }
+  // Server settings
+  | {
+      type: 'UPDATE_SERVER_SETTINGS';
+      payload: { name: string };
     };
 
 export interface DatabaseOperations {
@@ -254,7 +271,6 @@ export type CombinedConfiguration = {
   email: EmailConfiguration;
   server: ServerConfiguration;
   storage: StorageConfiguration;
-  devMode: boolean;
   oauth?: OAuthConfiguration;
 };
 
@@ -303,12 +319,7 @@ export type AuthConfiguration = {
    * the email address already exist (be invited)?
    */
   isInviteRequired: boolean;
-  /**
-   * Authentication mode for production use.
-   * 'magic-link' sends a one-time login link via email.
-   * 'password' uses traditional email + password credentials.
-   */
-  authMode: 'magic-link' | 'password';
+  authMode: AuthMode;
   /**
    * Use debug mode?
    */

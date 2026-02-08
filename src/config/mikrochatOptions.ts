@@ -8,12 +8,6 @@ export const mikrochatOptions = {
   configFilePath: 'mikrochat.config.json',
   args: process.argv,
   options: [
-    {
-      flag: '--dev',
-      path: 'devMode',
-      defaultValue: defaults.devMode,
-      isFlag: true
-    },
     // Auth configuration
     {
       flag: '--jwtSecret',

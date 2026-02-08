@@ -23,7 +23,8 @@ MikroChat is a minimalistic, self-hosted chat application for teams who want com
 - **Dark mode** for the hackers
 - **PWA support** -- installable with offline read access
 - **Encryption at rest** -- AES-256-GCM encryption for all stored data
-- **Dev mode** or **magic link** authentication
+- **Flexible auth** -- dev mode, magic link, password, or OAuth 2.0
+- **Webhooks** -- let external services post messages to channels
 - **Lightweight** -- minimal dependencies, single-file deployable
 
 ![Example view inside MikroChat](./readme/message.png)
@@ -47,7 +48,7 @@ npm run dev
 npm run dev:reload
 ```
 
-Open `http://localhost:8080` and sign in with your configured email.
+Open `http://localhost:8000` and sign in with your configured email.
 
 ## Documentation
 
@@ -75,7 +76,9 @@ When enabled, all values written to the database are encrypted with a key derive
 - **Frontend**: Vanilla HTML, CSS, and JavaScript (compiled with esbuild)
 - **Backend**: TypeScript with [MikroServe](https://github.com/mikaelvesavuori/mikroserve)
 - **Storage**: [PikoDB](https://github.com/mikaelvesavuori/pikodb) embedded database
-- **Auth**: [MikroAuth](https://github.com/mikaelvesavuori/mikroauth) magic links
+- **Auth**: [MikroAuth](https://github.com/mikaelvesavuori/mikroauth) (magic links, passwords, OAuth 2.0)
+- **Config**: [MikroConf](https://github.com/mikaelvesavuori/mikroconf) for configuration management
+- **IDs**: [MikroID](https://github.com/mikaelvesavuori/mikroid) for unique ID generation
 - **Real-time**: Server-Sent Events
 
 ## License

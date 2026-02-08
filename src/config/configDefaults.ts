@@ -1,5 +1,7 @@
 import { type IdConfigurationOptions, MikroID } from 'mikroid';
 
+import type { AuthMode } from '../interfaces';
+
 export const idName = 'mikrochat_id';
 export const idConfig: IdConfigurationOptions = {
   name: idName,
@@ -11,7 +13,6 @@ export const configDefaults = () => {
   const debug = getTruthyValue(process.env.DEBUG) || false;
 
   return {
-    devMode: false,
     auth: {
       jwtSecret: process.env.AUTH_JWT_SECRET || 'your-jwt-secret',
       magicLinkExpirySeconds: 15 * 60, // 15 minutes
@@ -19,7 +20,7 @@ export const configDefaults = () => {
       refreshTokenExpirySeconds: 7 * 24 * 60 * 60, // 7 days
       maxActiveSessions: 3,
       appUrl: process.env.APP_URL || 'http://127.0.0.1:3000',
-      authMode: 'magic-link' as 'magic-link' | 'password',
+      authMode: 'magic-link' as AuthMode,
       isInviteRequired: true,
       debug
     },
@@ -50,7 +51,7 @@ export const configDefaults = () => {
         enabled: true,
         requestsPerMinute: 100
       },
-      allowedDomains: ['http://127.0.0.1:8080'],
+      allowedDomains: ['http://127.0.0.1:8000'],
       debug
     },
     chat: {

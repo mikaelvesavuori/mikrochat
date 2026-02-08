@@ -31,7 +31,7 @@ const connectionTimeouts = new Map();
  * @description Runs a MikroServe instance to expose MikroChat as an API.
  */
 export async function startServer(settings: ServerSettings) {
-  const { config, auth, chat, devMode, isInviteRequired, authMode } = settings;
+  const { config, auth, chat, isInviteRequired, authMode, appUrl } = settings;
 
   const server = new MikroServe(config);
 
@@ -63,11 +63,11 @@ export async function startServer(settings: ServerSettings) {
     });
   }
 
-  ////////////////////
-  // Authentication //
-  ////////////////////
+  /////////////////////////////////////
+  // Development Mode Authentication //
+  /////////////////////////////////////
 
-  if (devMode) {
+  if (authMode === 'dev') {
     /**
      * @description Sign in (log in) user in development mode.
      * This option will generate a JWT and pass it back to the caller.
@@ -100,7 +100,7 @@ export async function startServer(settings: ServerSettings) {
   // Magic Link Auth Mode //
   //////////////////////////
 
-  if (!devMode && authMode !== 'password') {
+  if (authMode === 'magic-link') {
     /**
      * @description Sign in (log in) user. This uses a magic link email
      * to authenticate the user so a successful response here simply
@@ -164,7 +164,7 @@ export async function startServer(settings: ServerSettings) {
   // Password Auth Mode  //
   /////////////////////////
 
-  if (!devMode && authMode === 'password') {
+  if (authMode === 'password') {
     /**
      * @description Sign in with email and password.
      */
@@ -197,7 +197,13 @@ export async function startServer(settings: ServerSettings) {
 
       try {
         const user = await chat.getUserByEmail(email);
-        if (user?.passwordHash) await auth.createMagicLink({ email });
+        if (user)
+          await auth.createMagicLink({
+            email,
+            subject: user.passwordHash
+              ? 'Reset Your Password'
+              : 'Set Your Password'
+          });
       } catch {
         // Silently ignore errors to prevent email enumeration
       }
@@ -219,9 +225,9 @@ export async function startServer(settings: ServerSettings) {
      * Also used for password reset — the same token mechanism applies.
      */
     server.post('/auth/setup-password', async (c: Context) => {
-      const { email, password } = c.body;
+      const { email, password, token: bodyToken } = c.body;
       const authHeader = c.headers.authorization || '';
-      const token = authHeader.split(' ')[1];
+      const token = bodyToken || authHeader.split(' ')[1];
 
       if (!email || !token)
         return c.json({ error: 'Email and token are required' }, 400);
@@ -380,7 +386,7 @@ export async function startServer(settings: ServerSettings) {
               const description =
                 c.query.error_description || 'Authentication was denied';
               return c.redirect(
-                `/?oauth_error=${encodeURIComponent(description)}`,
+                `${appUrl}/?oauth_error=${encodeURIComponent(description)}`,
                 302
               );
             }
@@ -390,7 +396,7 @@ export async function startServer(settings: ServerSettings) {
             const code = c.query.code;
             if (!state || !code)
               return c.redirect(
-                `/?oauth_error=${encodeURIComponent('Missing state or authorization code')}`,
+                `${appUrl}/?oauth_error=${encodeURIComponent('Missing state or authorization code')}`,
                 302
               );
 
@@ -401,7 +407,7 @@ export async function startServer(settings: ServerSettings) {
             );
             if (!validation.valid)
               return c.redirect(
-                `/?oauth_error=${encodeURIComponent(validation.error || 'Invalid OAuth callback')}`,
+                `${appUrl}/?oauth_error=${encodeURIComponent(validation.error || 'Invalid OAuth callback')}`,
                 302
               );
 
@@ -413,7 +419,7 @@ export async function startServer(settings: ServerSettings) {
 
             if (!user && isInviteRequired) {
               return c.redirect(
-                `/?oauth_error=${encodeURIComponent('User not found. You must be invited before signing in with OAuth.')}`,
+                `${appUrl}/?oauth_error=${encodeURIComponent('User not found. You must be invited before signing in with OAuth.')}`,
                 302
               );
             }
@@ -432,14 +438,14 @@ export async function startServer(settings: ServerSettings) {
               refresh_token: result.refreshToken,
               expires_in: String(result.expiresIn)
             });
-            return c.redirect(`/?${oauthParams.toString()}`, 302);
+            return c.redirect(`${appUrl}/?${oauthParams.toString()}`, 302);
           } catch (error) {
             const message =
               error instanceof Error
                 ? error.message
                 : 'OAuth authentication failed';
             return c.redirect(
-              `/?oauth_error=${encodeURIComponent(message)}`,
+              `${appUrl}/?oauth_error=${encodeURIComponent(message)}`,
               302
             );
           }
@@ -630,6 +636,27 @@ export async function startServer(settings: ServerSettings) {
         { success: true, message: 'You have exited the server' },
         200
       );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  /**
+   * @description Update the current user's profile (display name).
+   */
+  server.put('/users/me', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+    try {
+      const { userName } = c.body;
+      if (!userName || typeof userName !== 'string')
+        return c.json({ error: 'userName is required' }, 400);
+
+      const updatedUser = await chat.updateUserName(user.id, userName);
+      return c.json({ user: MikroChat.sanitizeUser(updatedUser) }, 200);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'An error occurred';

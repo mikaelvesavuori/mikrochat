@@ -34,15 +34,29 @@ export async function loadWebhooks() {
         const webhookItem = document.createElement('div');
         webhookItem.className = 'webhook-item';
         webhookItem.dataset.id = webhook.id;
+        const webhookUrl = `${location.origin}/webhooks/${webhook.id}/messages`;
         webhookItem.innerHTML = `
           <div class="webhook-info">
             <div class="webhook-name">${webhook.name}</div>
+            <div class="webhook-channel">ID: ${webhook.id}</div>
             <div class="webhook-channel">Channel: #${channelName}</div>
+            <div class="webhook-url-row">
+              <code class="webhook-url">${webhookUrl}</code>
+              <button class="btn webhook-copy-url" title="Copy URL">Copy URL</button>
+            </div>
           </div>
           <div class="webhook-actions">
             <button class="remove-webhook" title="Delete Webhook">&#10005;</button>
           </div>
         `;
+
+        const copyUrlButton = webhookItem.querySelector('.webhook-copy-url');
+        if (copyUrlButton) {
+          copyUrlButton.addEventListener('click', () => {
+            navigator.clipboard.writeText(webhookUrl);
+            showToast('URL copied to clipboard');
+          });
+        }
 
         const removeButton = webhookItem.querySelector('.remove-webhook');
         if (removeButton) {
@@ -77,14 +91,34 @@ export async function createWebhook(name, channelId) {
     if (response.webhook) {
       showToast('Webhook created successfully!');
 
+      // Remove any previous token display
+      const existing = document.querySelector('.webhook-token-display');
+      if (existing) existing.remove();
+
+      const webhookUrl = `${location.origin}/webhooks/${response.webhook.id}/messages`;
       const tokenDisplay = document.createElement('div');
       tokenDisplay.className = 'webhook-token-display';
       tokenDisplay.innerHTML = `
-        <div class="webhook-token-label">Webhook Token (copy now, shown only once):</div>
+        <div class="webhook-token-label">URL:</div>
+        <code class="webhook-token-value">${webhookUrl}</code>
+        <button class="btn webhook-token-copy-url">Copy URL</button>
+        <div class="webhook-token-label">Token (copy now, shown only once):</div>
         <code class="webhook-token-value">${response.webhook.token}</code>
-        <button class="btn webhook-token-copy">Copy</button>
+        <button class="btn webhook-token-copy">Copy Token</button>
       `;
-      if (webhooksList) webhooksList.prepend(tokenDisplay);
+
+      // Insert before the webhooks list so loadWebhooks() won't destroy it
+      if (webhooksList) webhooksList.before(tokenDisplay);
+
+      const copyUrlButton = tokenDisplay.querySelector(
+        '.webhook-token-copy-url'
+      );
+      if (copyUrlButton) {
+        copyUrlButton.addEventListener('click', () => {
+          navigator.clipboard.writeText(webhookUrl);
+          showToast('URL copied to clipboard');
+        });
+      }
 
       const copyButton = tokenDisplay.querySelector('.webhook-token-copy');
       if (copyButton) {
@@ -95,7 +129,6 @@ export async function createWebhook(name, channelId) {
       }
 
       if (webhookNameInput) webhookNameInput.value = '';
-      await loadWebhooks();
     }
   } catch (error) {
     hideLoading();
@@ -114,7 +147,6 @@ export async function deleteWebhook(webhookId, name) {
       hideLoading();
 
       showToast(`Webhook "${name}" has been deleted`);
-      await loadWebhooks();
     } catch (error) {
       hideLoading();
       showToast(error.message || 'Failed to delete webhook', 'error');

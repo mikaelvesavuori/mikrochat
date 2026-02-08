@@ -1,7 +1,7 @@
 import type { PikoDB } from 'pikodb';
 import type { DatabaseOperations } from '../interfaces';
 
-import { EncryptedDatabase } from './EncryptedDatabase';
+import { EncryptedDatabase } from '../infrastructure/EncryptedDatabase';
 import { GeneralStorageProvider } from './GeneralStorageProvider';
 
 /**

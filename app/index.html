@@ -142,6 +142,7 @@
               <div class="user-name" id="user-name"></div>
             </div>
             <div class="user-dropdown" id="user-dropdown">
+              <div class="dropdown-item" id="user-settings-btn">Settings</div>
               <div class="dropdown-item danger" id="exit-server-btn">Exit Server</div>
               <div class="dropdown-item" id="logout-btn">Sign Out</div>
             </div>
@@ -307,9 +308,26 @@
           <div class="modal-title">Start Direct Message</div><button class="close-modal"
             id="close-start-dm-modal">&times;</button>
         </div>
+        <div class="form-group">
+          <input type="text" id="dm-user-search" placeholder="Search users...">
+        </div>
         <div class="dm-user-list" id="dm-user-list">
           <!-- Users will appear here -->
         </div>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="user-settings-modal">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">User Settings</div>
+          <button class="close-modal" id="close-user-settings-btn">&times;</button>
+        </div>
+        <div class="form-group">
+          <label for="user-settings-name">Display Name</label>
+          <input type="text" id="user-settings-name" placeholder="Enter your display name">
+        </div>
+        <button class="btn" id="user-settings-save-btn">Save</button>
       </div>
     </div>
 
@@ -331,10 +349,13 @@
     </div>
 
     <script src="mikrosafe.min.js" defer></script>
-    <script src="mikrochat.min.js" defer></script>
+    <!-- DEV: load source modules directly instead of bundle -->
+    <script type="module" src="scripts/main.mjs"></script>
+    <!-- PROD: uncomment for production bundle -->
+    <!-- <script src="mikrochat.min.js" defer></script> -->
 
     <script src="pwa.js" defer></script>
-    <script src="service-worker.js" defer></script>
+    <!-- <script src="service-worker.js" defer></script> -->
   </body>
 
 </html>

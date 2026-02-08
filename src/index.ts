@@ -14,6 +14,7 @@ import { startServer } from './Server.js';
 import { PikoDBProvider as ChatStorageProvider } from './providers/PikoDBProvider';
 
 import { mikrochatOptions } from './config/mikrochatOptions';
+import { addEmailTemplatesToConfig } from './config/addEmailTemplatesToConfig';
 
 /**
  * @description This starts MikroChat by first wiring up dependencies
@@ -21,27 +22,35 @@ import { mikrochatOptions } from './config/mikrochatOptions';
  */
 async function start() {
   const config = getConfig() as CombinedConfiguration;
+  const configWithEmailTemplates = addEmailTemplatesToConfig(config);
 
-  const db = new PikoDB(config.storage);
+  const db = new PikoDB(configWithEmailTemplates.storage);
   await db.start();
   const authStorageProvider = new AuthStorageProvider(db);
   const chatStorageProvider = new ChatStorageProvider(
     db,
-    config.storage.encryptionKey || undefined
+    configWithEmailTemplates.storage.encryptionKey || undefined
   );
-  const emailProvider = new MikroMailProvider(config.email);
+  const emailProvider = new MikroMailProvider(configWithEmailTemplates.email);
 
-  const auth = new MikroAuth(config, emailProvider, authStorageProvider);
-  const chat = new MikroChat(config.chat, chatStorageProvider);
+  const auth = new MikroAuth(
+    configWithEmailTemplates,
+    emailProvider,
+    authStorageProvider
+  );
+  const chat = new MikroChat(
+    configWithEmailTemplates.chat,
+    chatStorageProvider
+  );
 
   await startServer({
-    config: config.server,
+    config: configWithEmailTemplates.server,
     auth,
     chat,
-    devMode: config.devMode,
-    isInviteRequired: config.auth.isInviteRequired,
-    authMode: config.auth.authMode || 'magic-link',
-    oauth: config.oauth
+    isInviteRequired: configWithEmailTemplates.auth.isInviteRequired,
+    authMode: configWithEmailTemplates.auth.authMode || 'magic-link',
+    appUrl: configWithEmailTemplates.auth.appUrl,
+    oauth: configWithEmailTemplates.oauth
   });
 }
 

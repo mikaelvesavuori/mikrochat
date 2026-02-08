@@ -265,6 +265,19 @@ describe('MikroChat Conversations', () => {
       expect(updateEvent).toBeDefined();
     });
 
+    it('should throw error when message is not a DM', async () => {
+      const channel = await chat.createChannel('not-dm', adminUser.id);
+      const channelMsg = await chat.createMessage(
+        'channel msg',
+        adminUser.id,
+        channel.id
+      );
+
+      await expect(
+        chat.updateDirectMessage(channelMsg.id, adminUser.id, 'Updated')
+      ).rejects.toThrow('Message is not a direct message');
+    });
+
     it('should not allow updating someone elses message', async () => {
       await expect(
         chat.updateDirectMessage(message.id, regularUser.id, 'Hacked!')
@@ -324,6 +337,19 @@ describe('MikroChat Conversations', () => {
         (deleteEvent?.payload as { id: string; conversationId: string })
           .conversationId
       ).toBe(conversation.id);
+    });
+
+    it('should throw error when message is not a DM', async () => {
+      const channel = await chat.createChannel('not-dm-del', adminUser.id);
+      const channelMsg = await chat.createMessage(
+        'channel msg',
+        adminUser.id,
+        channel.id
+      );
+
+      await expect(
+        chat.deleteDirectMessage(channelMsg.id, adminUser.id)
+      ).rejects.toThrow('Message is not a direct message');
     });
 
     it('should not allow deleting someone elses DM (even as admin)', async () => {

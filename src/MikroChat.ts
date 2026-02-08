@@ -150,7 +150,12 @@ export class MikroChat {
   }
 
   public async updateServerSettings(settings: { name: string }) {
-    return await this.db.updateServerSettings(settings);
+    await this.db.updateServerSettings(settings);
+
+    this.emitEvent({
+      type: 'UPDATE_SERVER_SETTINGS',
+      payload: { name: settings.name }
+    });
   }
 
   public async getMessageById(id: string) {
@@ -264,6 +269,34 @@ export class MikroChat {
       type: 'USER_EXIT',
       payload: { id: userId, userName: user.userName }
     });
+  }
+
+  /**
+   * @description Update a user's display name.
+   */
+  public async updateUserName(
+    userId: string,
+    newUserName: string
+  ): Promise<User> {
+    const trimmed = newUserName.trim();
+    if (!trimmed) throw new Error('User name cannot be empty');
+
+    const user = await this.getUserById(userId);
+    if (!user) throw new Error('User not found');
+
+    const existing = await this.db.getUserByUsername(trimmed);
+    if (existing && existing.id !== userId)
+      throw new Error('User name is already taken');
+
+    const updatedUser = { ...user, userName: trimmed };
+    await this.createUser(updatedUser);
+
+    this.emitEvent({
+      type: 'UPDATE_USER',
+      payload: { id: userId, userName: trimmed }
+    });
+
+    return updatedUser;
   }
 
   //////////////////////

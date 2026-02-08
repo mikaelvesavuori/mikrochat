@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 
 import type { DatabaseOperations } from '../src/interfaces';
-import { EncryptedDatabase } from '../src/providers/EncryptedDatabase';
+
+import { EncryptedDatabase } from '../src/infrastructure/EncryptedDatabase';
 
 /**
  * Simple in-memory store for testing.

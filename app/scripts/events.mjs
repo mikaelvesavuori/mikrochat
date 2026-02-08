@@ -136,6 +136,19 @@ export async function setupMessageEvents(channelId) {
             loadChannels();
             break;
 
+          case 'UPDATE_CHANNEL':
+            loadChannels();
+            // Update header if we're viewing the renamed channel
+            if (data.payload.id === state.currentChannelId) {
+              const headerEl = document.getElementById('current-channel-name');
+              if (headerEl) headerEl.textContent = data.payload.name;
+            }
+            break;
+
+          case 'DELETE_CHANNEL':
+            loadChannels();
+            break;
+
           case 'NEW_REACTION':
             // We don't have a channelId here, so let's just accept
             if (data.payload.messageId) {
@@ -177,6 +190,18 @@ export async function setupMessageEvents(channelId) {
           case 'REMOVE_USER':
             if (data.payload.id === state.currentUser.id) {
               await signout();
+            }
+            break;
+
+          case 'UPDATE_USER':
+            if (data.payload.id === state.currentUser.id) {
+              state.currentUser.userName = data.payload.userName;
+              const { getInitials } = await import('./utils.mjs');
+              document.getElementById('user-avatar').textContent = getInitials(
+                data.payload.userName
+              );
+              document.getElementById('user-name').textContent =
+                data.payload.userName;
             }
             break;
 
@@ -277,6 +302,15 @@ export async function setupMessageEvents(channelId) {
             removeThreadReplyFromView(data.payload.id, data.payload.threadId);
             break;
           }
+
+          case 'UPDATE_SERVER_SETTINGS':
+            if (data.payload.name) {
+              const serverNameText =
+                document.querySelector('.server-name-text');
+              if (serverNameText)
+                serverNameText.textContent = data.payload.name;
+            }
+            break;
 
           case 'NEW_WEBHOOK':
           case 'DELETE_WEBHOOK': {
