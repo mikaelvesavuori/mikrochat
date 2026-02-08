@@ -1,14 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { build } from 'esbuild';
 
+// This file builds the API (backend) part of MikroChat
+
 const format = (process.argv[2] || 'all').replace('--', '');
-const outputFileName = 'mikrochat.bundled';
+const outputFileName = 'mikrochat';
 
 const getPackageVersion = () =>
   JSON.parse(readFileSync('./package.json', 'utf-8')).version;
 const packageVersion = getPackageVersion();
 
-console.log(`Building MikroChat (${packageVersion}) for format "${format}"...`);
+console.log(
+  `Building MikroChat API (${packageVersion}) for format "${format}"...`
+);
 
 const getConfig = () => {
   return {
@@ -27,18 +31,8 @@ const getConfig = () => {
 
 const common = getConfig();
 
-if (format === 'all' || format === 'esm') {
-  build({
-    ...common,
-    format: 'esm',
-    outfile: `lib/${outputFileName}.mjs`
-  }).catch(() => process.exit(1));
-}
-
-if (format === 'all' || format === 'cjs') {
-  build({
-    ...common,
-    format: 'cjs',
-    outfile: `lib/${outputFileName}.cjs`
-  }).catch(() => process.exit(1));
-}
+build({
+  ...common,
+  format: 'esm',
+  outfile: `lib/${outputFileName}.mjs`
+}).catch(() => process.exit(1));

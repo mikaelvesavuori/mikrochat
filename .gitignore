@@ -21,7 +21,9 @@ mikrochat_db/
 uploads/
 *mikrochat.config.json
 .claude/
+sbom.json
 
+mikrochat/
 releases/
 
 # Files generated from tests

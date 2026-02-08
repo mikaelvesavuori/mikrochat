@@ -1,0 +1,4 @@
+npx tsc
+npm run lint
+npm test
+git add .

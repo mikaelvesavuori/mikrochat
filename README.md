@@ -31,13 +31,36 @@ MikroChat is a minimalistic, self-hosted chat application for teams who want com
 
 ## Quick Start
 
+### Production (recommended)
+
+Install the CLI with a single command, then download and run MikroChat:
+
 ```bash
-# Clone and install
+curl -sSL https://releases.mikrochat.com/install.sh | bash
+mikrochat install
+
+mkdir my-chat && cd my-chat
+mikrochat init
+# Edit mikrochat.config.json with your settings
+mikrochat start
+```
+
+The API runs on `http://localhost:3000`. Serve the `app/` directory (created by `mikrochat init`) with your web server of choice (Caddy, nginx, etc.) for the frontend.
+
+### Download release
+
+Download the [latest release](https://releases.mikrochat.com/mikrochat_latest.zip), extract it, and deploy:
+
+- `api/mikrochat.mjs` -- run with `node mikrochat.mjs` on your server
+- `app/` -- deploy to any static host or serve with a reverse proxy
+
+### Development
+
+```bash
 git clone https://github.com/mikaelvesavuori/mikrochat.git
 cd mikrochat
 npm install
 
-# Configure
 cp mikrochat.config.example.json mikrochat.config.json
 # Edit mikrochat.config.json with your settings
 
@@ -48,7 +71,7 @@ npm run dev
 npm run dev:reload
 ```
 
-Open `http://localhost:8000` and sign in with your configured email.
+Open `http://localhost:8000` and sign in with your configured initial user's email.
 
 ## Documentation
 

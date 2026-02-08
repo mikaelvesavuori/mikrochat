@@ -3,6 +3,8 @@ import { build } from 'esbuild';
 import { minify } from 'html-minifier-terser';
 import { transform } from 'lightningcss';
 
+// This file builds the application (frontend, web app) part of MikroChat
+
 ////////
 // JS //
 ////////
@@ -10,12 +12,12 @@ import { transform } from 'lightningcss';
 const getPackageVersion = () =>
   JSON.parse(readFileSync('./package.json', 'utf-8')).version;
 
-async function bundle(isMinified = false) {
+async function bundle(isMinified = true) {
   const packageVersion = getPackageVersion();
   const fileName = isMinified ? 'mikrochat.min.js' : 'mikrochat.js';
   const message = isMinified
-    ? `Bundling version ${packageVersion} (minified) of MikroChat to "${fileName}"...`
-    : `Bundling version ${packageVersion} of MikroChat to "${fileName}"...`;
+    ? `Bundling version ${packageVersion} (minified) of MikroChat (web app) to "${fileName}"...`
+    : `Bundling version ${packageVersion} of MikroChat (web app) to "${fileName}"...`;
   console.log(message);
 
   await build({
@@ -36,7 +38,6 @@ async function bundle(isMinified = false) {
 }
 
 await bundle();
-await bundle(true);
 
 /////////
 // CSS //

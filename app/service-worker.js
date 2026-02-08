@@ -17,9 +17,6 @@ function isMessageImage(url) {
   return url.pathname.match(/\/channels\/.*\/messages\/image\/.*/);
 }
 
-// TODO: Reactivate
-
-/*
 self.addEventListener('install', (event) => {
   self.skipWaiting(); // Activate immediately
   event.waitUntil(
@@ -99,4 +96,3 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
-*/
