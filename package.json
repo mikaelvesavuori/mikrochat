@@ -46,6 +46,7 @@
     "lint": "npx @biomejs/biome check --write ./src ./app",
     "licenses": "npx license-checker-rseidelsohn --production --plainVertical --excludePackagesStartingWith \"molnos;esbuild;@esbuild\" --out oss-licenses.txt",
     "sbom": "syft file:package-lock.json --output spdx-json > ./sbom.json",
+    "scan": "grype ./sbom.json -o json",
     "package": "npm pack",
     "prepublishOnly": "npm run build",
     "prepare": "husky"
