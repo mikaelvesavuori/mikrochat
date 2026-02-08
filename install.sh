@@ -271,7 +271,7 @@ mikrochat_uninstall() {
 }
 
 mikrochat_docs() {
-    DOCS_URL="https://github.com/mikaelvesavuori/mikrochat"
+    DOCS_URL="https://docs.mikrochat.com"
 
     if command -v xdg-open &> /dev/null; then
         xdg-open "$DOCS_URL"
@@ -355,8 +355,8 @@ print_success "Done!"
 echo ""
 print_info "Quick start:"
 echo ""
-echo "  mikrochat install     # Download MikroChat"
+echo "  mikrochat install            # Download MikroChat"
 echo "  mkdir my-chat && cd my-chat"
-echo "  mikrochat init        # Create config + copy web app"
-echo "  mikrochat start       # Start the API server"
+echo "  mikrochat init               # Create config + copy web app"
+echo "  mikrochat start              # Start the API server"
 echo ""
