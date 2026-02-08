@@ -149,7 +149,7 @@ mikrochat_init() {
         cat > "mikrochat.config.json" << 'CONFIGEOF'
 {
   "auth": {
-    "authMode": "password",
+    "authMode": "dev",
     "jwtSecret": "CHANGE-ME-use-a-random-string-at-least-32-characters",
     "appUrl": "http://localhost:8000",
     "isInviteRequired": false

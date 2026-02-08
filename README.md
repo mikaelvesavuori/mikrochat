@@ -27,7 +27,7 @@ MikroChat is a minimalistic, self-hosted chat application for teams who want com
 - **Webhooks** — let external services post messages to channels
 - **Lightweight** — minimal dependencies, single-file deployable backend
 
-![Example view inside MikroChat](./readme/message.png)
+![Example view inside MikroChat](./readme/mikrochat-example.png)
 
 ## Quick Start
 

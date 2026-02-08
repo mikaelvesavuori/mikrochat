@@ -4,6 +4,12 @@
  */
 
 export const addEmailInput = document.getElementById('add-email-input');
+export const addUserPasswordGroup = document.getElementById(
+  'add-user-password-group'
+);
+export const addUserPasswordInput = document.getElementById(
+  'add-user-password-input'
+);
 export const addUserButton = document.getElementById('add-user-btn');
 export const addChannelButton = document.getElementById('add-channel-btn');
 export const appContainer = document.getElementById('app-container');

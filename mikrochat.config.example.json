@@ -8,7 +8,8 @@
   "chat": {
     "initialUser": {
       "userName": "you",
-      "email": "you@yourdomain.com"
+      "email": "you@yourdomain.com",
+      "password": "change-me"
     }
   },
   "server": {

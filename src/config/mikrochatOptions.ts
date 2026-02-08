@@ -193,6 +193,11 @@ export const mikrochatOptions = {
       defaultValue: defaults.chat.initialUser.email
     },
     {
+      flag: '--initialUserPassword',
+      path: 'chat.initialUser.password',
+      defaultValue: defaults.chat.initialUser.password
+    },
+    {
       flag: '--messageRetentionDays',
       path: 'chat.messageRetentionDays',
       defaultValue: defaults.chat.messageRetentionDays

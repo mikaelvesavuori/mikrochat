@@ -29,7 +29,12 @@ import {
   passwordResetSentForm,
   passwordResetSentMessage
 } from './dom.mjs';
-import { AUTH_MODE, DEFAULT_PASSWORD, ENABLE_OAUTH } from './config.mjs';
+import {
+  AUTH_MODE,
+  DEFAULT_PASSWORD,
+  HAS_EMAIL,
+  ENABLE_OAUTH
+} from './config.mjs';
 import { getUrlParams } from './url.mjs';
 import { isMagicLinkUrl } from './magiclink.mjs';
 import {
@@ -243,7 +248,7 @@ export function renderPasswordSignInView() {
   authPasswordGroup.style.display = 'block';
   authPasswordConfirmGroup.style.display = 'none';
   authToggle.style.display = 'none';
-  authForgotPassword.style.display = 'block';
+  authForgotPassword.style.display = HAS_EMAIL ? 'block' : 'none';
   loginButton.textContent = 'Sign In';
 
   hideLoading();

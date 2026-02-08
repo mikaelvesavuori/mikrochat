@@ -69,6 +69,12 @@ export class MikroChat {
       });
     }
 
+    if (this.config.initialUser.password) {
+      const user = adminUser || (await this.getUserByEmail(email));
+      if (user && !user.passwordHash)
+        await this.setUserPassword(user.id, this.config.initialUser.password);
+    }
+
     const generalChannel = await this.db.getChannelByName(
       this.generalChannelName
     );

@@ -73,6 +73,7 @@ export type ChatConfiguration = {
     id: string;
     userName: string;
     email: string;
+    password?: string;
   };
   messageRetentionDays: number;
   maxMessagesPerChannel: number;
@@ -83,6 +84,7 @@ export type ServerSettings = {
   auth: MikroAuth;
   chat: MikroChat;
   isInviteRequired: boolean;
+  hasEmailConfig: boolean;
   authMode: AuthMode;
   appUrl: string;
   oauth?: OAuthConfiguration;

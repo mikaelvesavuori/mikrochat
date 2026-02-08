@@ -2,11 +2,12 @@
  * @description MikroChat Front-End Configuration
  */
 
-export const DEBUG_MODE = true;
+export const DEBUG_MODE = false;
 export const AUTH_MODE = 'password'; // Options: "dev", "magic-link", "password"
 export const API_BASE_URL = 'http://localhost:3000';
 export const DEFAULT_PASSWORD = '$J2Ek<wp5Wsp+x!FsGb[';
 export const ENABLE_USER_SPECIFIC_ENCRYPTION = false;
+export const HAS_EMAIL = false;
 export const ENABLE_OAUTH = false;
 export const MAX_CONTENT_LENGTH = 1000;
 

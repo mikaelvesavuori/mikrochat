@@ -31,7 +31,15 @@ const connectionTimeouts = new Map();
  * @description Runs a MikroServe instance to expose MikroChat as an API.
  */
 export async function startServer(settings: ServerSettings) {
-  const { config, auth, chat, isInviteRequired, authMode, appUrl } = settings;
+  const {
+    config,
+    auth,
+    chat,
+    isInviteRequired,
+    hasEmailConfig,
+    authMode,
+    appUrl
+  } = settings;
 
   const server = new MikroServe(config);
 
@@ -539,7 +547,7 @@ export async function startServer(settings: ServerSettings) {
     const user = c.state.user;
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-    const { email, role } = c.body;
+    const { email, role, password } = c.body;
     if (!email) return c.json({ error: 'Email is required' }, 400);
 
     try {
@@ -554,9 +562,11 @@ export async function startServer(settings: ServerSettings) {
       if (existingUser)
         return c.json({ success: false, message: 'User already exists' });
 
-      const userId = await chat.addUser(email, user.id, role === 'admin');
+      const newUser = await chat.addUser(email, user.id, role === 'admin');
 
-      if (authMode === 'password') {
+      if (authMode === 'password' && password) {
+        await chat.setUserPassword(newUser.id, password);
+      } else if (authMode === 'password' && hasEmailConfig) {
         try {
           await auth.createMagicLink({ email });
         } catch {
@@ -564,7 +574,7 @@ export async function startServer(settings: ServerSettings) {
         }
       }
 
-      return c.json({ success: true, userId }, 200);
+      return c.json({ success: true, userId: newUser.id }, 200);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'An error occurred';
@@ -603,6 +613,31 @@ export async function startServer(settings: ServerSettings) {
 
     try {
       await chat.removeUser(userId, user.id);
+      return c.json({ success: true }, 200);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  /**
+   * @description Admin-only: reset a user's password directly.
+   */
+  server.post('/users/:id/reset-password', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+    if (!user.isAdmin)
+      return c.json({ error: 'Only administrators can reset passwords' }, 403);
+
+    const userId = c.params.id;
+    const { password } = c.body;
+
+    if (!password || password.length < 8)
+      return c.json({ error: 'Password must be at least 8 characters' }, 400);
+
+    try {
+      await chat.setUserPassword(userId, password);
       return c.json({ success: true }, 200);
     } catch (error) {
       const message =

@@ -58,7 +58,8 @@ export const configDefaults = () => {
       initialUser: {
         id: process.env.INITIAL_USER_ID || new MikroID().add(idConfig),
         userName: process.env.INITIAL_USER_NAME || '',
-        email: process.env.INITIAL_USER_EMAIL || ''
+        email: process.env.INITIAL_USER_EMAIL || '',
+        password: process.env.INITIAL_USER_PASSWORD || ''
       },
       messageRetentionDays: 30,
       maxMessagesPerChannel: 100

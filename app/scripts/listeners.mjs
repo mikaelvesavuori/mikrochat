@@ -6,6 +6,7 @@
 import { state } from './state.mjs';
 import {
   addEmailInput,
+  addUserPasswordInput,
   addUserButton,
   addChannelButton,
   authForgotPasswordLink,
@@ -466,9 +467,14 @@ export function initializeListeners() {
   // User management listeners
   addUserButton?.addEventListener('click', async () => {
     const email = addEmailInput.value.trim();
+    const password = addUserPasswordInput?.value?.trim() || '';
+    const role =
+      document.querySelector('input[name="user-role"]:checked')?.value ||
+      'user';
     if (email) {
-      await addUser(email, 'user');
+      await addUser(email, role, password || undefined);
       addEmailInput.value = '';
+      if (addUserPasswordInput) addUserPasswordInput.value = '';
     }
   });
 

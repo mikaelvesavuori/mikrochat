@@ -53,6 +53,7 @@ async function start() {
     auth,
     chat,
     isInviteRequired: configWithEmailTemplates.auth.isInviteRequired,
+    hasEmailConfig,
     authMode,
     appUrl: configWithEmailTemplates.auth.appUrl,
     oauth: configWithEmailTemplates.oauth
