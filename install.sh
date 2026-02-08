@@ -160,11 +160,6 @@ mikrochat_init() {
       "email": "admin@yourdomain.com"
     }
   },
-  "email": {
-    "user": "",
-    "host": "",
-    "password": ""
-  },
   "server": {
     "allowedDomains": ["*"]
   }
@@ -172,7 +167,8 @@ mikrochat_init() {
 CONFIGEOF
 
         print_success "mikrochat.config.json created"
-        print_info "Edit it to set your JWT secret, initial user, and (optionally) email settings"
+        print_info "Edit it to set your JWT secret and initial user"
+        print_info "Add an 'email' block if using magic-link auth or features like password reset"
     fi
 
     # Copy web app files

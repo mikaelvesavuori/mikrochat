@@ -11,11 +11,6 @@
       "email": "you@yourdomain.com"
     }
   },
-  "email": {
-    "user": "email_user",
-    "host": "smtp.emailprovider.com",
-    "password": "something"
-  },
   "server": {
     "allowedDomains": [
       "*"

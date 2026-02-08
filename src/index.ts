@@ -31,11 +31,16 @@ async function start() {
     db,
     configWithEmailTemplates.storage.encryptionKey || undefined
   );
-  const emailProvider = new MikroMailProvider(configWithEmailTemplates.email);
+  const authMode = configWithEmailTemplates.auth.authMode || 'magic-link';
+  const hasEmailConfig = !!configWithEmailTemplates.email?.host;
+  const emailProvider =
+    authMode === 'magic-link' || hasEmailConfig
+      ? new MikroMailProvider(configWithEmailTemplates.email)
+      : undefined;
 
   const auth = new MikroAuth(
     configWithEmailTemplates,
-    emailProvider,
+    emailProvider as any,
     authStorageProvider
   );
   const chat = new MikroChat(
@@ -48,7 +53,7 @@ async function start() {
     auth,
     chat,
     isInviteRequired: configWithEmailTemplates.auth.isInviteRequired,
-    authMode: configWithEmailTemplates.auth.authMode || 'magic-link',
+    authMode,
     appUrl: configWithEmailTemplates.auth.appUrl,
     oauth: configWithEmailTemplates.oauth
   });

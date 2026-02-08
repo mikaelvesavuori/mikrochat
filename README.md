@@ -23,7 +23,7 @@ MikroChat is a minimalistic, self-hosted chat application for teams who want com
 - **Dark mode** for the hackers
 - **PWA support** -- installable with offline read access
 - **Encryption at rest** -- AES-256-GCM encryption for all stored data
-- **Flexible auth** -- dev mode, magic link, password, or OAuth 2.0
+- **Flexible auth** -- dev mode, magic link, password, or OAuth 2.0 (email config only needed for magic link)
 - **Webhooks** -- let external services post messages to channels
 - **Lightweight** -- minimal dependencies, single-file deployable
 
