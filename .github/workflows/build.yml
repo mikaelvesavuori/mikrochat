@@ -1,0 +1,48 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - 'main'
+  pull_request:
+    branches:
+      - 'main'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Compile
+        run: npx tsc
+
+      - name: Test
+        run: npm test
+
+      - name: Install Syft
+        run: curl -sSfL https://get.anchore.io/syft | sudo sh -s -- -b /usr/local/bin
+
+      - name: Install Grype
+        run: curl -sSfL https://get.anchore.io/grype | sudo sh -s -- -b /usr/local/bin
+
+      - name: Install Grant
+        run: curl -sSfL https://get.anchore.io/grant | sudo sh -s -- -b /usr/local/bin
+
+      - name: Run Syft
+        run: npm run sbom
+
+      - name: Run Grype
+        run: npm run scan
+
+      - name: Run Grant
+        run: npm run licenses
