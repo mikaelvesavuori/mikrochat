@@ -6,7 +6,7 @@
  */
 window.MIKROCHAT_CONFIG = {
   DEBUG_MODE: false,
-  AUTH_MODE: 'password', // Options: "dev", "magic-link", "password"
+  AUTH_MODE: 'dev', // Options: "dev", "magic-link", "password"
   API_BASE_URL: 'http://localhost:3000',
   DEFAULT_PASSWORD: '$J2Ek<wp5Wsp+x!FsGb[',
   ENABLE_USER_SPECIFIC_ENCRYPTION: false,
