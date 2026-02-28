@@ -67,13 +67,14 @@
     "tsup": "8",
     "tsx": "4",
     "typescript": "5",
-    "vitest": "4"
+    "vitest": "4",
+    "wrangler": "4"
   },
   "dependencies": {
     "mikroauth": "latest",
     "mikroconf": "latest",
-    "pikodb": "latest",
     "mikroid": "latest",
-    "mikroserve": "latest"
+    "mikroserve": "latest",
+    "pikodb": "latest"
   }
 }
