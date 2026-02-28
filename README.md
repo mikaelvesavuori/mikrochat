@@ -2,11 +2,11 @@
 
 ![Icon](./icons/icon-144x144.png)
 
-**The minimalist chat app that's all yours**.
+**The minimalist chat app that's all yours.**
 
 MikroChat is a minimalistic, self-hosted chat application for teams who want complete control over their communication — without expensive bills, vendor lock-in, or distractions.
 
-![Build Status](https://github.com/mikaelvesavuori/mikrochat/workflows/main/badge.svg)
+![Build Status](https://github.com/mikaelvesavuori/mikrochat/workflows/build/badge.svg)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
@@ -91,6 +91,10 @@ Full documentation is available at **[docs.mikrochat.com](https://docs.mikrochat
 - **Config**: [MikroConf](https://github.com/mikaelvesavuori/mikroconf) for configuration management
 - **IDs**: [MikroID](https://github.com/mikaelvesavuori/mikroid) for unique ID generation
 - **Real-time**: Server-Sent Events
+
+## See docs site for more
+
+Visit [the docs site](https://docs.mikrochat.com) to get much more detailed instructions.
 
 ## License
 

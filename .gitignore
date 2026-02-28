@@ -22,6 +22,7 @@ uploads/
 *mikrochat.config.json
 .claude/
 sbom.json
+.deployment/
 
 mikrochat/
 releases/
