@@ -1,0 +1,162 @@
+---
+title: User Management
+description: How to add users, manage roles, and control access in MikroChat.
+---
+
+MikroChat has a simple user model: users are either regular users or admins. Admins have additional privileges to manage the server and other users.
+
+## User Roles
+
+| Role      | Capabilities                                                                                           |
+|-----------|--------------------------------------------------------------------------------------------------------|
+| **User**  | Send/edit/delete own messages, add reactions, create channels, manage channels they created, view public channels and private channels they belong to |
+| **Admin** | All user capabilities, plus: manage users, manage any channel, delete any channel message, manage webhooks, export data, view audit logs, change server settings |
+
+## Adding Users
+
+### Through the Settings Panel
+
+Admins can add users through the web interface:
+
+1. Click the server name in the top-left corner
+2. In the Settings panel, find the "Add User" section
+3. Enter the user's email address
+4. If email is not configured (password mode), enter an initial password for the user
+5. Select the user's role (User or Admin)
+6. Click "Add User"
+
+When email is configured, the user receives an invite link to set their password. When email is not configured, the admin shares the credentials with the user directly.
+
+### Initial User
+
+The first admin is configured in `mikrochat.config.json`:
+
+```json
+{
+  "chat": {
+    "initialUser": {
+      "userName": "admin",
+      "email": "admin@example.com",
+      "password": "change-me-on-first-login"
+    }
+  }
+}
+```
+
+This user is created automatically when the server first starts and has admin privileges. The `password` field is optional but required for password auth mode without email configured — without it, the initial admin has no way to sign in. The password is only set on first start; it is not overwritten on subsequent restarts if the user already has a password.
+
+## Resetting Passwords
+
+When email is not configured in password auth mode, admins can reset a user's password directly from the settings panel:
+
+1. Click the server name
+2. Find the user in the list
+3. Click the reset password button (↻) next to their name
+4. Enter a new password (minimum 8 characters)
+
+The admin then shares the new credentials with the user. When email is configured, users can reset their own password via the "Forgot password?" link on the sign-in screen.
+
+## Removing Users
+
+Admins can remove users through the Settings panel:
+
+1. Click the server name
+2. Find the user in the list
+3. Click the remove button next to their name
+
+When a user is removed:
+
+- They are immediately signed out
+- They cannot sign in again (unless re-added)
+- Their messages remain in the channels
+
+:::caution[Cannot remove last admin]
+The last remaining admin cannot be removed. This prevents accidentally locking yourself out of the server.
+:::
+
+## Promoting and Demoting Admins
+
+Admin status is managed through the Settings panel:
+
+1. Click the server name
+2. Find the user in the list
+3. Click the role action next to their name
+
+Admins can promote regular users or demote other admins. The last remaining admin cannot be demoted, which prevents accidentally locking yourself out of the server.
+
+## Leaving a Server
+
+Users can leave a server voluntarily:
+
+1. Click your username in the sidebar
+2. Select "Exit Server"
+
+This removes your account from the server. You'll need to be re-invited to rejoin.
+
+Admins can only leave if there's at least one other admin remaining.
+
+## Signing Out
+
+To sign out without leaving the server:
+
+1. Click your username in the sidebar
+2. Select "Sign Out"
+
+This ends your current session but keeps your account on the server. You can sign in again anytime.
+
+## Invite-Only Mode
+
+Control who can join your server with the `isInviteRequired` setting:
+
+```json
+{
+  "auth": {
+    "isInviteRequired": true
+  }
+}
+```
+
+**When enabled (default):**
+
+- Only users explicitly added by an admin can sign in
+- Attempting to sign in with an unknown email shows an error
+- Provides a private, controlled environment
+
+**When disabled:**
+
+- Anyone can sign in with any email address
+- New users are created automatically on first sign-in
+- Suitable for open communities or testing
+
+## Session Management
+
+Each user can have up to 3 concurrent sessions (configurable). A session represents an active sign-in on a device or browser.
+
+When a user exceeds the session limit, the oldest session is automatically invalidated.
+
+```json
+{
+  "auth": {
+    "maxActiveSessions": 3
+  }
+}
+```
+
+## User Data
+
+User information stored by MikroChat:
+
+| Field       | Description                             |
+|-------------|-----------------------------------------|
+| `id`        | Unique identifier (auto-generated)      |
+| `userName`  | Display name                            |
+| `email`     | Email address (used for authentication) |
+| `isAdmin`   | Admin status                            |
+| `createdAt` | Account creation timestamp              |
+
+## Best Practices
+
+1. **Start with invite-only mode**: Add users explicitly rather than allowing open registration
+2. **Limit admin count**: Only grant admin privileges to users who need them
+3. **Use descriptive usernames**: Help team members identify each other
+4. **Review user list periodically**: Remove users who no longer need access

@@ -75,6 +75,18 @@ export function removePendingUpload(index) {
 }
 
 /**
+ * @description Clear all pending uploads and revoke their preview URLs.
+ */
+export function clearPendingUploads() {
+  for (const upload of state.pendingUploads) {
+    if (upload.preview) URL.revokeObjectURL(upload.preview);
+  }
+
+  state.pendingUploads = [];
+  updatePendingUploadsUI();
+}
+
+/**
  * @description Resize and compress image.
  */
 export function resizeAndCompressImage(file) {
@@ -282,6 +294,22 @@ export function convertBlobToBase64(blob) {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+/**
+ * @description Convert a pending upload entry to the API payload shape.
+ */
+export async function createImageUploadPayload(upload) {
+  const image = await convertBlobToBase64(upload.blob);
+  const payload = {
+    filename: upload.fileName || upload.name,
+    image
+  };
+
+  if (upload.thumbnailBlob)
+    payload.thumbnail = await convertBlobToBase64(upload.thumbnailBlob);
+
+  return payload;
 }
 
 /**

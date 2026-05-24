@@ -1,0 +1,200 @@
+---
+title: Server Options
+description: Complete reference for MikroChat server options.
+---
+
+## Server Options
+
+MikroChat can be started directly with Node.js from the API release archive. All configuration can be provided via CLI flags, environment variables, or a configuration file.
+
+```bash
+node lib/mikrochat.mjs
+
+# With options
+node lib/mikrochat.mjs --port 3001 --debug
+```
+
+### Server Flags
+
+| Flag          | Description                     | Default     |
+| ------------- | ------------------------------- | ----------- |
+| `--port`      | Port to listen on               | `3000`      |
+| `--host`      | Host/bind address               | `127.0.0.1` |
+| `--https`     | Enable HTTPS                    | `false`     |
+| `--http2`     | Enable HTTP/2                   | `false`     |
+| `--cert`      | SSL certificate path            | -           |
+| `--key`       | SSL private key path            | -           |
+| `--ca`        | SSL CA certificate path         | -           |
+| `--ratelimit` | Enable rate limiting            | `true`      |
+| `--rps`       | Requests per minute limit       | `100`       |
+| `--allowed`   | Comma-separated allowed domains | -           |
+| `--debug`     | Enable debug mode               | `false`     |
+
+### Authentication Flags
+
+| Flag                          | Description              | Default       |
+| ----------------------------- | ------------------------ | ------------- |
+| `--jwtSecret`                 | JWT signing key          | -             |
+| `--appUrl`                    | Base URL for magic links | -             |
+| `--magicLinkExpirySeconds`    | Magic link expiry time   | `900`         |
+| `--jwtExpirySeconds`          | JWT expiry time          | `900`         |
+| `--refreshTokenExpirySeconds` | Refresh token expiry     | `604800`      |
+| `--maxActiveSessions`         | Max sessions per user    | `3`           |
+| `--authMode`                  | Auth mode                | `magic-link`  |
+| `--isInviteRequired`          | Require admin invite     | `true`        |
+
+### Chat Flags
+
+| Flag                      | Description              | Default |
+| ------------------------- | ------------------------ | ------- |
+| `--initialUserId`         | Initial admin user ID    | -       |
+| `--initialUserName`       | Initial admin username   | -       |
+| `--initialUserEmail`      | Initial admin email      | -       |
+| `--initialUserPassword`   | Initial admin password   | -       |
+| `--messageRetentionDays`  | Days to keep messages    | `30`    |
+| `--maxMessagesPerChannel` | Max messages per channel | `100`   |
+
+### Email Flags
+
+| Flag                | Description              | Default                  |
+| ------------------- | ------------------------ | ------------------------ |
+| `--emailSubject`    | Magic link email subject | `Your Secure Login Link` |
+| `--emailHost`       | SMTP host                | -                        |
+| `--emailUser`       | SMTP username            | -                        |
+| `--emailPassword`   | SMTP password            | -                        |
+| `--emailPort`       | SMTP port                | `465`                    |
+| `--emailSecure`     | Use secure connection    | `true`                   |
+| `--emailMaxRetries` | Max delivery attempts    | `2`                      |
+
+### Storage Flags
+
+| Flag              | Description                     | Default        |
+| ----------------- | ------------------------------- | -------------- |
+| `--db`            | Database directory path         | `mikrochat_db` |
+| `--encryptionKey` | Encryption key for data at rest | -              |
+
+## Environment Variables
+
+| Variable             | Description              |
+| -------------------- | ------------------------ |
+| `MIKROCHAT_PORT`     | Server port              |
+| `PORT`               | Server port fallback     |
+| `HOST`               | Server host              |
+| `DEBUG`              | Enable debug mode        |
+| `AUTH_JWT_SECRET`    | JWT signing key          |
+| `APP_URL`            | Base URL for magic links |
+| `INITIAL_USER_ID`    | Initial admin user ID    |
+| `INITIAL_USER_NAME`  | Initial admin username   |
+| `INITIAL_USER_EMAIL`    | Initial admin email      |
+| `INITIAL_USER_PASSWORD` | Initial admin password   |
+| `EMAIL_USER`            | SMTP username            |
+| `EMAIL_HOST`         | SMTP host                |
+| `EMAIL_PASSWORD`     | SMTP password            |
+| `STORAGE_KEY`        | Encryption key           |
+
+## Configuration File
+
+Create `mikrochat.config.json` in the working directory:
+
+```json
+{
+  "auth": {
+    "jwtSecret": "your-secret-key",
+    "authMode": "magic-link",
+    "appUrl": "https://chat.example.com",
+    "isInviteRequired": true
+  },
+  "chat": {
+    "initialUser": {
+      "userName": "admin",
+      "email": "admin@example.com",
+      "password": ""
+    }
+  },
+  "server": {
+    "port": 3000
+  }
+}
+```
+
+See [Configuration](../guides/configuration) for the complete reference.
+
+## Configuration Priority
+
+Settings are applied in this order (highest priority first):
+
+1. CLI flags
+2. Configuration file (`mikrochat.config.json`)
+3. Default values (which include environment variables)
+
+## Examples
+
+### Local Testing
+
+```bash
+# Custom port
+node lib/mikrochat.mjs --port 3001 --debug
+```
+
+### Production
+
+```bash
+# With environment variables
+MIKROCHAT_PORT=3000 \
+AUTH_JWT_SECRET=your-secret \
+EMAIL_HOST=smtp.example.com \
+EMAIL_USER=noreply@example.com \
+EMAIL_PASSWORD=password \
+node lib/mikrochat.mjs
+
+# With HTTPS
+node lib/mikrochat.mjs \
+  --https \
+  --cert /path/to/cert.pem \
+  --key /path/to/key.pem
+
+# With rate limiting
+node lib/mikrochat.mjs --ratelimit --rps 60
+```
+
+### Docker
+
+```bash
+docker run -d \
+  -e MIKROCHAT_PORT=3000 \
+  -e AUTH_JWT_SECRET=your-secret \
+  -v mikrochat-data:/app/mikrochat_db \
+  -p 3000:3000 \
+  mikrochat
+```
+
+## Debugging
+
+Enable debug mode to see verbose logs:
+
+```bash
+# Via CLI flag
+node lib/mikrochat.mjs --debug
+
+# Via environment variable
+DEBUG=true node lib/mikrochat.mjs
+```
+
+Debug mode logs:
+
+- Incoming HTTP requests
+- Authentication events
+- Database operations
+- SSE connection lifecycle
+- Email delivery attempts
+
+## Health Check
+
+The server exposes a health endpoint:
+
+```bash
+curl http://127.0.0.1:3000/health
+# Returns: OK
+```
+
+Use this for container health checks and load balancer probes.

@@ -2,12 +2,7 @@
  * @description Conversation (Direct Messages) related functionality.
  */
 import { state } from './state.mjs';
-import {
-  dmList,
-  startDmModal,
-  dmUserList,
-  currentChannelName
-} from './dom.mjs';
+import { dmList, startDmModal, dmUserList, currentChannelName } from './dom.mjs';
 import { showToast, updateDocumentTitle } from './ui.mjs';
 import { loadDMMessagesForConversation } from './dmMessages.mjs';
 import { apiRequest } from './api.mjs';
@@ -65,9 +60,11 @@ export function renderConversationItem(conversation) {
   const otherUser = conversation.otherUser;
   const userName = otherUser?.userName || 'Unknown User';
   const initial = userName.charAt(0).toUpperCase();
+  const presence = otherUser ? state.presence.get(otherUser.id)?.status || 'offline' : 'offline';
+  item.dataset.presence = presence;
 
   item.innerHTML = `
-    <div class="dm-avatar">${initial}</div>
+    <div class="dm-avatar"><span>${initial}</span><i class="presence-dot ${presence}"></i></div>
     <span class="dm-name">${userName}</span>
     ${getUnreadBadge(conversation.id)}
   `;
@@ -111,9 +108,7 @@ export async function selectConversation(conversationId) {
   updateDocumentTitle();
 
   // Re-render the DM item to remove the notification badge
-  const dmItem = document.querySelector(
-    `.dm-item[data-conversation-id="${conversationId}"]`
-  );
+  const dmItem = document.querySelector(`.dm-item[data-conversation-id="${conversationId}"]`);
   if (dmItem) {
     const badge = dmItem.querySelector('.notification-badge');
     if (badge) badge.remove();
@@ -237,8 +232,7 @@ function renderDmUserSelectList(users) {
   dmUserList.innerHTML = '';
 
   if (users.length === 0) {
-    dmUserList.innerHTML =
-      '<div class="empty-list">No other users available</div>';
+    dmUserList.innerHTML = '<div class="empty-list">No other users available</div>';
     return;
   }
 
@@ -246,9 +240,7 @@ function renderDmUserSelectList(users) {
     const item = document.createElement('div');
     item.className = 'dm-user-item';
 
-    const initial =
-      user.userName?.charAt(0).toUpperCase() ||
-      user.email.charAt(0).toUpperCase();
+    const initial = user.userName?.charAt(0).toUpperCase() || user.email.charAt(0).toUpperCase();
 
     item.innerHTML = `
       <div class="user-avatar">${initial}</div>
@@ -271,10 +263,7 @@ export function updateConversationInCache(conversation) {
   state.conversationCache.set(conversation.id, conversation);
   const conversations = Array.from(state.conversationCache.values());
   // Sort by lastMessageAt
-  conversations.sort(
-    (a, b) =>
-      (b.lastMessageAt || b.createdAt) - (a.lastMessageAt || a.createdAt)
-  );
+  conversations.sort((a, b) => (b.lastMessageAt || b.createdAt) - (a.lastMessageAt || a.createdAt));
   renderConversationsList(conversations);
 }
 

@@ -26,12 +26,31 @@ export type User = {
   passwordHash?: string;
 };
 
+export type UserPresenceStatus = 'online' | 'away' | 'offline';
+
+export type UserPresence = {
+  userId: string;
+  status: UserPresenceStatus;
+  lastSeen: UnixTimestamp;
+};
+
 export type Channel = {
   id: string;
   name: string;
+  topic?: string;
+  isPrivate?: boolean;
+  members?: string[];
+  pinnedMessageIds?: string[];
   createdAt?: UnixTimestamp;
   updatedAt?: UnixTimestamp;
   createdBy?: string;
+};
+
+export type FileAttachment = {
+  filename: string;
+  originalName: string;
+  contentType: string;
+  size: number;
 };
 
 export type Message = {
@@ -43,6 +62,10 @@ export type Message = {
     isBot?: boolean;
   };
   images?: string[];
+  attachments?: FileAttachment[];
+  quotedMessageId?: string;
+  mentions?: string[];
+  pinnedAt?: UnixTimestamp;
   channelId: string;
   createdAt: UnixTimestamp;
   updatedAt?: UnixTimestamp;
@@ -66,6 +89,16 @@ export type Webhook = {
   token: string;
   createdAt: UnixTimestamp;
   createdBy: string;
+};
+
+export type AuditLogEntry = {
+  id: string;
+  action: string;
+  actorId?: string;
+  targetType: string;
+  targetId?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: UnixTimestamp;
 };
 
 export type ChatConfiguration = {
@@ -119,7 +152,7 @@ export type ServerSentEvent =
   // Users
   | {
       type: 'NEW_USER';
-      payload: { id: string; userName: string; email: string };
+      payload: { id: string; userName: string; email: string; isAdmin: boolean };
     }
   | {
       type: 'REMOVE_USER';
@@ -131,7 +164,7 @@ export type ServerSentEvent =
     }
   | {
       type: 'UPDATE_USER';
-      payload: { id: string; userName: string };
+      payload: { id: string; userName: string; isAdmin: boolean };
     }
   // Direct Messages / Conversations
   | { type: 'NEW_CONVERSATION'; payload: Conversation }
@@ -184,6 +217,11 @@ export type ServerSentEvent =
   | {
       type: 'UPDATE_SERVER_SETTINGS';
       payload: { name: string };
+    }
+  // Presence
+  | {
+      type: 'PRESENCE_UPDATE';
+      payload: UserPresence;
     };
 
 export interface DatabaseOperations {
@@ -213,41 +251,30 @@ export interface StorageProvider {
   listChannels(): Promise<Channel[]>;
 
   getMessageById(id: string): Promise<Message | null>;
-  listMessagesByChannel(
-    channelId: string,
-    options?: PaginationOptions
-  ): Promise<Message[]>;
+  listMessages(): Promise<Message[]>;
+  listMessagesByChannel(channelId: string, options?: PaginationOptions): Promise<Message[]>;
   createMessage(message: Message): Promise<void>;
   updateMessage(message: Message): Promise<void>;
   deleteMessage(id: string): Promise<void>;
 
-  addReaction(
-    messageId: string,
-    userId: string,
-    reaction: string
-  ): Promise<Message | null>;
+  addReaction(messageId: string, userId: string, reaction: string): Promise<Message | null>;
   removeReaction(messageId: string, userId: string): Promise<Message | null>;
 
   getServerSettings(): Promise<{ name: string } | null>;
   updateServerSettings(settings: { name: string }): Promise<void>;
 
   getConversationById(id: string): Promise<Conversation | null>;
-  getConversationByParticipants(
-    userId1: string,
-    userId2: string
-  ): Promise<Conversation | null>;
+  getConversationByParticipants(userId1: string, userId2: string): Promise<Conversation | null>;
   createConversation(conversation: Conversation): Promise<void>;
   updateConversation(conversation: Conversation): Promise<void>;
+  listConversations(): Promise<Conversation[]>;
   listConversationsForUser(userId: string): Promise<Conversation[]>;
   listMessagesByConversation(
     conversationId: string,
     options?: PaginationOptions
   ): Promise<Message[]>;
 
-  listMessagesByThread(
-    threadId: string,
-    options?: PaginationOptions
-  ): Promise<Message[]>;
+  listMessagesByThread(threadId: string, options?: PaginationOptions): Promise<Message[]>;
 
   getWebhookById(id: string): Promise<Webhook | null>;
   getWebhookByToken(token: string): Promise<Webhook | null>;
@@ -255,6 +282,9 @@ export interface StorageProvider {
   listWebhooksByChannel(channelId: string): Promise<Webhook[]>;
   createWebhook(webhook: Webhook): Promise<void>;
   deleteWebhook(id: string): Promise<void>;
+
+  createAuditLogEntry(entry: AuditLogEntry): Promise<void>;
+  listAuditLog(): Promise<AuditLogEntry[]>;
 }
 
 export type ConfigurationOptions = {
@@ -342,7 +372,7 @@ export type ServerConfiguration = {
    */
   port: number;
   /**
-   * Host to bind to (defaults to HOST env var or '0.0.0.0')
+   * Host to bind to (defaults to HOST env var or '127.0.0.1')
    */
   host: string;
   /**
@@ -417,7 +447,4 @@ export type EmailTemplateConfiguration = {
  * @param expiryMinutes - The number of minutes until the link expires.
  * @returns The formatted text or HTML content for the email.
  */
-export type MagicLinkTemplate = (
-  magicLink: string,
-  expiryMinutes: number
-) => string;
+export type MagicLinkTemplate = (magicLink: string, expiryMinutes: number) => string;

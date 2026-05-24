@@ -1,0 +1,35 @@
+{
+  "name": "mikrochat-docs",
+  "type": "module",
+  "version": "1.0.0",
+  "keywords": [
+    "mikrochat",
+    "documentation",
+    "docs",
+    "starlight"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mikaelvesavuori/mikrochat.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mikaelvesavuori/mikrochat/issues"
+  },
+  "homepage": "https://github.com/mikaelvesavuori/mikrochat#readme",
+  "private": true,
+  "description": "The public documentation site for MikroChat.",
+  "author": "MikroChat",
+  "license": "MIT",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "latest",
+    "astro": "latest",
+    "typescript": "6"
+  }
+}

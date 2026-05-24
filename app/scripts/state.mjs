@@ -15,12 +15,15 @@ export const state = {
   currentMessageForEditIsDM: false,
   currentMessageForEditContent: '',
   currentMessageForEditImages: [],
-  isStorageInitialized: false,
+  quotedMessage: null,
   pendingUploads: [],
+  pendingFiles: [],
   tempIdMap: new Map(),
   messageCache: new LRUMap(2000),
+  channelCache: new LRUMap(500),
   unreadCounts: new Map(),
-  storage: null,
+  userCache: new LRUMap(500),
+  presence: new Map(),
   // Direct Messages state
   currentConversationId: null,
   conversationCache: new LRUMap(200),
@@ -32,6 +35,8 @@ export const state = {
   threadMessageCache: new LRUMap(500),
   threadPanelOpen: false,
   currentMessageForEditIsThread: false,
+  // Runtime configuration fetched from the API
+  runtimeConfig: null,
   // Network state
   isOffline: typeof navigator !== 'undefined' ? !navigator.onLine : false
 };

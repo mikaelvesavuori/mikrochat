@@ -1,1 +1,0 @@
-addChannelButton.addEventListener('click', openCreateChannelModal);

@@ -1,0 +1,315 @@
+---
+title: Configuration
+description: Complete configuration reference for MikroChat.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+MikroChat can be configured through CLI flags, environment variables, or a JSON configuration file. CLI flags take the highest priority.
+
+## Configuration Priority
+
+1. **CLI flags** (highest priority)
+2. **Config file** (`mikrochat.config.json`)
+3. **Default values and environment variables** (lowest priority)
+
+## Configuration File
+
+Create a `mikrochat.config.json` file in your project root:
+
+```json
+{
+  "auth": {
+    "jwtSecret": "your-secret-signing-key",
+    "appUrl": "https://chat.example.com",
+    "authMode": "magic-link",
+    "isInviteRequired": true,
+    "magicLinkExpirySeconds": 900,
+    "jwtExpirySeconds": 900,
+    "refreshTokenExpirySeconds": 604800,
+    "maxActiveSessions": 3
+  },
+  "chat": {
+    "initialUser": {
+      "userName": "admin",
+      "email": "admin@example.com",
+      "password": ""
+    },
+    "messageRetentionDays": 30,
+    "maxMessagesPerChannel": 100
+  },
+  "email": {
+    "user": "noreply@example.com",
+    "host": "smtp.example.com",
+    "password": "smtp-password",
+    "port": 465,
+    "secure": true
+  },
+  "storage": {
+    "databaseDirectory": "mikrochat_db",
+    "encryptionKey": "optional-encryption-key"
+  },
+  "server": {
+    "port": 3000,
+    "host": "0.0.0.0",
+    "allowedDomains": ["https://chat.example.com"],
+    "rateLimit": {
+      "enabled": true,
+      "requestsPerMinute": 100
+    }
+  },
+  "oauth": {
+    "presets": {
+      "google": {
+        "clientId": "your-google-client-id",
+        "clientSecret": "your-google-client-secret",
+        "redirectUri": "https://chat.example.com/auth/oauth/google/callback"
+      }
+    },
+    "stateExpirySeconds": 600,
+    "rateLimiting": {
+      "maxAttempts": 10,
+      "windowMs": 900000
+    }
+  }
+}
+```
+
+## Configuration Options Reference
+
+### Authentication
+
+| CLI Flag                      | JSON Path                        | Environment Variable | Default      | Description                           |
+|-------------------------------|----------------------------------|----------------------|--------------|---------------------------------------|
+| `--jwtSecret`                 | `auth.jwtSecret`                 | `AUTH_JWT_SECRET`    | -            | JWT signing key (required)            |
+| `--appUrl`                    | `auth.appUrl`                    | `APP_URL`            | -            | Base URL for magic links              |
+| `--isInviteRequired`          | `auth.isInviteRequired`          | -                    | `true`       | Require admin invite before signup    |
+| `--magicLinkExpirySeconds`    | `auth.magicLinkExpirySeconds`    | -                    | `900`        | Magic link expiry (15 min)            |
+| `--jwtExpirySeconds`          | `auth.jwtExpirySeconds`          | -                    | `900`        | JWT expiry (15 min)                   |
+| `--refreshTokenExpirySeconds` | `auth.refreshTokenExpirySeconds` | -                    | `604800`     | Refresh token expiry (7 days)         |
+| `--maxActiveSessions`         | `auth.maxActiveSessions`         | -                    | `3`          | Max concurrent sessions per user      |
+| `--authMode`                  | `auth.authMode`                  | -                    | `magic-link` | Auth mode: `dev`, `magic-link`, or `password`  |
+
+### Chat
+
+| CLI Flag                  | JSON Path                    | Environment Variable | Default | Description                |
+|---------------------------|------------------------------|----------------------|---------|----------------------------|
+| `--initialUserId`         | `chat.initialUser.id`        | `INITIAL_USER_ID`    | -       | ID for initial admin user  |
+| `--initialUserName`       | `chat.initialUser.userName`  | `INITIAL_USER_NAME`  | -       | Username for initial admin |
+| `--initialUserEmail`      | `chat.initialUser.email`     | `INITIAL_USER_EMAIL`    | -       | Email for initial admin    |
+| `--initialUserPassword`   | `chat.initialUser.password`  | `INITIAL_USER_PASSWORD` | -       | Password for initial admin |
+| `--messageRetentionDays`  | `chat.messageRetentionDays`  | -                       | `30`    | Days to keep messages      |
+| `--maxMessagesPerChannel` | `chat.maxMessagesPerChannel` | -                    | `100`   | Max messages per channel   |
+
+### Email (Optional)
+
+Email configuration is **required** for magic-link authentication and **optional** for password mode. Without email in password mode, admins set user passwords directly through the settings panel; with email, users get invite links and can use self-service password reset. Email is not needed for dev mode or OAuth-only setups.
+
+| CLI Flag            | JSON Path            | Environment Variable | Default                  | Description           |
+|---------------------|----------------------|----------------------|--------------------------|-----------------------|
+| `--emailSubject`    | `email.emailSubject` | -                    | `Your Secure Login Link` | Email subject line    |
+| `--emailUser`       | `email.user`         | `EMAIL_USER`         | -                        | SMTP username         |
+| `--emailHost`       | `email.host`         | `EMAIL_HOST`         | -                        | SMTP host             |
+| `--emailPassword`   | `email.password`     | `EMAIL_PASSWORD`     | -                        | SMTP password         |
+| `--emailPort`       | `email.port`         | -                    | `465`                    | SMTP port             |
+| `--emailSecure`     | `email.secure`       | -                    | `true`                   | Use secure connection |
+| `--emailMaxRetries` | `email.maxRetries`   | -                    | `2`                      | Max delivery attempts |
+
+### Storage
+
+| CLI Flag          | JSON Path                   | Environment Variable | Default        | Description                     |
+|-------------------|-----------------------------|----------------------|----------------|---------------------------------|
+| `--db`            | `storage.databaseDirectory` | -                    | `mikrochat_db` | Database directory path         |
+| `--encryptionKey` | `storage.encryptionKey`     | `STORAGE_KEY`        | -              | Encryption key for data at rest |
+
+When an encryption key is provided, all data written to the database (messages, users, channels, conversations, and settings) is encrypted using AES-256-GCM. See [Encryption at Rest](#encryption-at-rest) below for details.
+
+### Server
+
+| CLI Flag      | JSON Path                            | Environment Variable | Default | Description               |
+|---------------|--------------------------------------|----------------------|---------|---------------------------|
+| `--port`      | `server.port`                        | `MIKROCHAT_PORT`, `PORT` | `3000`  | Server port               |
+| `--host`      | `server.host`                        | `HOST`               | `127.0.0.1` | Server bind address    |
+| `--https`     | `server.useHttps`                    | -                    | `false` | Enable HTTPS              |
+| `--http2`     | `server.useHttp2`                    | -                    | `false` | Enable HTTP/2             |
+| `--cert`      | `server.sslCert`                     | -                    | -       | SSL certificate path      |
+| `--key`       | `server.sslKey`                      | -                    | -       | SSL private key path      |
+| `--ca`        | `server.sslCa`                       | -                    | -       | SSL CA certificate path   |
+| `--ratelimit` | `server.rateLimit.enabled`           | -                    | `true`  | Enable rate limiting      |
+| `--rps`       | `server.rateLimit.requestsPerMinute` | -                    | `100`   | Requests per minute limit |
+| `--allowed`   | `server.allowedDomains`              | -                    | -       | CORS allowed domains      |
+| `--debug`     | `server.debug`                       | `DEBUG`              | `false` | Enable debug mode         |
+
+### OAuth (Optional)
+
+OAuth is disabled by default. Add the `oauth` block to enable OAuth sign-in alongside existing auth modes.
+
+**Presets** (provide just credentials for common providers):
+
+| JSON Path                              | Default | Description                   |
+|----------------------------------------|---------|-------------------------------|
+| `oauth.presets.google.clientId`        | -       | Google OAuth client ID        |
+| `oauth.presets.google.clientSecret`    | -       | Google OAuth client secret    |
+| `oauth.presets.google.redirectUri`     | -       | Google callback URL           |
+| `oauth.presets.microsoft.clientId`     | -       | Microsoft OAuth client ID     |
+| `oauth.presets.microsoft.clientSecret` | -       | Microsoft OAuth client secret |
+| `oauth.presets.microsoft.redirectUri`  | -       | Microsoft callback URL        |
+| `oauth.presets.github.clientId`        | -       | GitHub OAuth client ID        |
+| `oauth.presets.github.clientSecret`    | -       | GitHub OAuth client secret    |
+| `oauth.presets.github.redirectUri`     | -       | GitHub callback URL           |
+| `oauth.presets.gitlab.clientId`        | -       | GitLab OAuth client ID        |
+| `oauth.presets.gitlab.clientSecret`    | -       | GitLab OAuth client secret    |
+| `oauth.presets.gitlab.redirectUri`     | -       | GitLab callback URL           |
+
+**General OAuth settings:**
+
+| JSON Path                        | Default  | Description                      |
+|----------------------------------|----------|----------------------------------|
+| `oauth.stateExpirySeconds`       | `600`    | CSRF state token expiry (10 min) |
+| `oauth.rateLimiting.maxAttempts` | `10`     | Max OAuth attempts per window    |
+| `oauth.rateLimiting.windowMs`    | `900000` | Rate limit window (15 min)       |
+
+**Custom providers** (`oauth.custom` array) accept full provider config objects. See the [Authentication guide](../guides/authentication#custom-providers) for details.
+
+The redirect URI for each provider must follow the pattern: `https://your-domain.com/auth/oauth/{providerId}/callback`
+
+## Frontend Configuration
+
+The web application reads browser-only deployment settings from `config.js`, a standalone file that lives alongside the built frontend in the `dist/` (or `app/`) directory. Edit it directly — changes take effect on page reload with no rebuild needed.
+
+Authentication mode, email availability, password reset support, registration support, and OAuth availability are read from the backend at runtime through `GET /config.json`. `GET /auth/config` remains available as a compatibility alias. Configure those values in `mikrochat.config.json`, not in `config.js`.
+
+```javascript
+window.MIKROCHAT_CONFIG = {
+  DEBUG_MODE: false,
+  API_BASE_URL: 'http://127.0.0.1:3000',
+  MAX_CONTENT_LENGTH: 1000
+};
+```
+
+| Option                          | Default                | Description                                                            |
+|---------------------------------|------------------------|------------------------------------------------------------------------|
+| `DEBUG_MODE`                    | `false`                | Enable debug logging (console table of config on load)                 |
+| `API_BASE_URL`                  | `'http://127.0.0.1:3000'` | Backend API URL                                                     |
+| `MAX_CONTENT_LENGTH`            | `1000`                 | Maximum message length in characters                                   |
+
+### Public Runtime Configuration
+
+The browser fetches `GET /config.json` on startup. The response contains safe, non-secret capabilities such as `auth.mode`, `auth.hasEmail`, `auth.oauthEnabled`, `auth.passwordResetEnabled`, and `auth.registrationEnabled`.
+
+### Enabling OAuth Sign-In
+
+OAuth sign-in works **alongside** whatever backend `auth.authMode` you choose. When OAuth providers are configured on the backend, the frontend fetches the list of available providers from `GET /auth/oauth/providers` and renders "Sign in with ..." buttons above the regular login form, separated by an "or" divider.
+
+To enable OAuth sign-in:
+
+1. **Configure providers on the backend** by adding an `oauth` block to `mikrochat.config.json` (see [OAuth configuration](#oauth-optional) above and the [Authentication guide](../guides/authentication#oauth-20-authentication)).
+
+If the backend has no OAuth providers configured, the buttons are simply not shown.
+
+The frontend includes built-in SVG icons for Google, GitHub, Microsoft, and GitLab. Custom providers are displayed without an icon.
+
+## Custom Email Templates
+
+Customize magic link emails by providing template functions:
+
+```javascript
+{
+  auth: {
+    templates: {
+      textVersion: (magicLink, expiryMinutes) =>
+        `Sign in to MikroChat: ${magicLink} (expires in ${expiryMinutes} minutes)`,
+      htmlVersion: (magicLink, expiryMinutes) =>
+        `<h1>Sign in to MikroChat</h1><p><a href="${magicLink}">Click here</a> (expires in ${expiryMinutes} minutes)</p>`
+    }
+  }
+}
+```
+
+## HTTPS Configuration
+
+Enable HTTPS or HTTP/2 for production:
+
+```json
+{
+  "server": {
+    "useHttps": true,
+    "sslCert": "/path/to/certificate.pem",
+    "sslKey": "/path/to/private-key.pem",
+    "sslCa": "/path/to/ca-certificate.pem"
+  }
+}
+```
+
+Generate self-signed certificates for testing:
+
+```bash
+openssl genrsa -out private-key.pem 2048
+openssl req -new -key private-key.pem -out csr.pem
+openssl x509 -req -days 365 -in csr.pem -signkey private-key.pem -out certificate.pem
+```
+
+## Encryption at Rest
+
+MikroChat supports AES-256-GCM encryption for all stored data. When enabled, every value written to the database is encrypted before persistence and decrypted on read. Database keys (e.g. `message:abc123`) remain unencrypted so prefix-based lookups continue to work.
+
+To enable encryption, set the `STORAGE_KEY` environment variable or the `storage.encryptionKey` config option:
+
+<Tabs>
+<TabItem label="Environment variable">
+```bash
+STORAGE_KEY=your-secret-key node lib/mikrochat.mjs
+```
+</TabItem>
+<TabItem label="Config file">
+```json
+{
+  "storage": {
+    "encryptionKey": "your-secret-key"
+  }
+}
+```
+</TabItem>
+<TabItem label="CLI flag">
+```bash
+node lib/mikrochat.mjs --encryptionKey your-secret-key
+```
+</TabItem>
+</Tabs>
+
+The provided key is derived into a 256-bit cryptographic key using `scrypt`. Each value is encrypted with a unique random IV, producing authenticated ciphertext that prevents both reading and tampering.
+
+:::caution[Changing or losing the encryption key]
+If you change or lose the encryption key, existing encrypted data becomes unreadable. Always back up your encryption key securely.
+:::
+
+Without a `STORAGE_KEY`, data is stored unencrypted (the default).
+
+## Debug Mode
+
+Enable debug mode for verbose logging:
+
+<Tabs>
+<TabItem label="CLI">
+```bash
+node lib/mikrochat.mjs --debug
+```
+</TabItem>
+<TabItem label="Environment">
+```bash
+DEBUG=true node lib/mikrochat.mjs
+```
+</TabItem>
+<TabItem label="Config file">
+```json
+{
+  "server": { "debug": true },
+  "auth": { "debug": true },
+  "email": { "debug": true },
+  "storage": { "debug": true }
+}
+```
+</TabItem>
+</Tabs>
+
+The CLI `--debug` flag enables debug mode across all areas. Use the config file for granular control.

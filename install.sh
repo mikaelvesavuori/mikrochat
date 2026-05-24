@@ -151,7 +151,7 @@ mikrochat_init() {
   "auth": {
     "authMode": "dev",
     "jwtSecret": "CHANGE-ME-use-a-random-string-at-least-32-characters",
-    "appUrl": "http://localhost:8000",
+    "appUrl": "http://127.0.0.1:8000",
     "isInviteRequired": false
   },
   "chat": {
@@ -271,7 +271,7 @@ mikrochat_uninstall() {
 }
 
 mikrochat_docs() {
-    DOCS_URL="https://docs.mikrochat.com"
+    DOCS_URL="https://mikrosuite.com/chat/docs"
 
     if command -v xdg-open &> /dev/null; then
         xdg-open "$DOCS_URL"

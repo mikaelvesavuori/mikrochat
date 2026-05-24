@@ -3,19 +3,24 @@ import { usersList, addUserPasswordGroup } from './dom.mjs';
 import { apiRequest } from './api.mjs';
 import { showToast, showLoading, hideLoading } from './ui.mjs';
 import { getInitials, formatTime } from './utils.mjs';
-import { AUTH_MODE, HAS_EMAIL } from './config.mjs';
+import { getAuthMode, hasEmailConfig } from './runtime-config.mjs';
+import { icon } from './icons.mjs';
 
 /**
  * @description Get all users on the server.
  */
 export async function loadUsers() {
   try {
-    const showPasswordControls = AUTH_MODE === 'password' && !HAS_EMAIL;
-    if (showPasswordControls && addUserPasswordGroup)
-      addUserPasswordGroup.style.display = 'block';
+    const showPasswordControls = getAuthMode() === 'password' && !hasEmailConfig();
+    if (showPasswordControls && addUserPasswordGroup) addUserPasswordGroup.style.display = 'block';
+    const canManageUsers = state.currentUser?.isAdmin === true;
+    const addUserForm = document.querySelector('.add-user-form');
+    if (addUserForm) addUserForm.style.display = canManageUsers ? '' : 'none';
 
     const response = await apiRequest('/users', 'GET');
     usersList.innerHTML = '';
+    state.userCache.clear();
+    for (const user of response.users || []) state.userCache.set(user.id, user);
 
     if (response.users && response.users.length > 0) {
       const sortedUsers = [...response.users].sort((a, b) => {
@@ -35,33 +40,37 @@ export async function loadUsers() {
           <div class="user-avatar">${getInitials(user.userName || user.email.split('@')[0])}</div>
           <div class="user-info">
             <div class="user-email">${user.email}</div>
-            <div class="user-role ${user.isAdmin ? 'admin-role' : 'user-role'}">${user.isAdmin ? 'Admin' : 'User'}</div>
+            <div class="role-badge ${user.isAdmin ? 'admin-role' : 'regular-role'}">${user.isAdmin ? 'Admin' : 'User'}</div>
             <div class="user-created">Added ${formatTime(new Date(user.createdAt))}</div>
           </div>
           ${
-            isOtherUser
+            isOtherUser && canManageUsers
               ? `
             <div class="user-actions">
-              ${showPasswordControls ? '<button class="reset-password-user" title="Reset Password">↻</button>' : ''}
-              <button class="remove-user" title="Remove User">✕</button>
+              <button class="toggle-role-user" title="${user.isAdmin ? 'Make User' : 'Make Admin'}">${user.isAdmin ? 'Make User' : 'Make Admin'}</button>
+              ${showPasswordControls ? `<button class="reset-password-user" title="Reset Password">${icon('arrow-path')}</button>` : ''}
+              <button class="remove-user" title="Remove User">${icon('x-mark')}</button>
             </div>
           `
               : ''
           }
         `;
 
+        const roleButton = userItem.querySelector('.toggle-role-user');
+        if (roleButton) {
+          roleButton.addEventListener('click', () =>
+            updateUserRole(user.id, user.email, user.isAdmin ? 'user' : 'admin')
+          );
+        }
+
         const removeButton = userItem.querySelector('.remove-user');
         if (removeButton) {
-          removeButton.addEventListener('click', () =>
-            removeUser(user.id, user.email)
-          );
+          removeButton.addEventListener('click', () => removeUser(user.id, user.email));
         }
 
         const resetButton = userItem.querySelector('.reset-password-user');
         if (resetButton) {
-          resetButton.addEventListener('click', () =>
-            resetUserPassword(user.id, user.email)
-          );
+          resetButton.addEventListener('click', () => resetUserPassword(user.id, user.email));
         }
 
         usersList.appendChild(userItem);
@@ -72,6 +81,25 @@ export async function loadUsers() {
   } catch (error) {
     console.error('Error loading users:', error);
     showToast('Failed to load users', 'error');
+  }
+}
+
+/**
+ * @description Update an existing user's role.
+ */
+async function updateUserRole(userId, email, role) {
+  const label = role === 'admin' ? 'admin' : 'user';
+  if (!confirm(`Make ${email} a ${label}?`)) return;
+
+  try {
+    showLoading();
+    await apiRequest(`/users/${userId}/role`, 'PUT', { role });
+    hideLoading();
+    showToast(`User role updated for ${email}`);
+    loadUsers();
+  } catch (error) {
+    hideLoading();
+    showToast(error.message || 'Failed to update user role', 'error');
   }
 }
 
@@ -100,9 +128,7 @@ export async function addUser(email, role, password) {
  * @description Admin: reset a user's password.
  */
 async function resetUserPassword(userId, email) {
-  const password = prompt(
-    `Enter new password for ${email} (min 8 characters):`
-  );
+  const password = prompt(`Enter new password for ${email} (min 8 characters):`);
   if (!password) return;
   if (password.length < 8) {
     showToast('Password must be at least 8 characters', 'error');

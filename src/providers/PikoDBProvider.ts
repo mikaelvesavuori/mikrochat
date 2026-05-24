@@ -16,9 +16,7 @@ export class PikoDBProvider extends GeneralStorageProvider {
     this.pikoDB = pikoDB;
 
     const database: DatabaseOperations = new PikoDbDatabase(pikoDB);
-    this.db = encryptionKey
-      ? new EncryptedDatabase(database, encryptionKey)
-      : database;
+    this.db = encryptionKey ? new EncryptedDatabase(database, encryptionKey) : database;
   }
 
   /**
@@ -57,6 +55,7 @@ class PikoDbDatabase implements DatabaseOperations {
     if (key.startsWith('channel:')) return 'channels';
     if (key.startsWith('conversation:')) return 'conversations';
     if (key.startsWith('webhook:')) return 'webhooks';
+    if (key.startsWith('audit:')) return 'audit';
     if (key.startsWith('server:')) return 'settings';
     return 'misc';
   }
@@ -97,16 +96,11 @@ class PikoDbDatabase implements DatabaseOperations {
    */
   public async list<T>(prefix: string): Promise<T[]> {
     try {
-      const allItems =
-        ((await this.db.get(this.getTable(prefix))) as any[]) || [];
+      const allItems = ((await this.db.get(this.getTable(prefix))) as any[]) || [];
 
       const filteredItems = allItems
         .filter((item) => {
-          return (
-            Array.isArray(item) &&
-            typeof item[0] === 'string' &&
-            item[0].startsWith(prefix)
-          );
+          return Array.isArray(item) && typeof item[0] === 'string' && item[0].startsWith(prefix);
         })
         .map((item) => item[1] as T)
         .filter((value): value is T => value != null);

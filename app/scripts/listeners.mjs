@@ -11,22 +11,31 @@ import {
   addChannelButton,
   authForgotPasswordLink,
   channelNameInput,
+  channelTopicInput,
+  channelPrivateInput,
+  channelMembersInput,
   closeChannelModal,
   closeEditChannelModalEl,
   closeEditModalEl,
+  closePinsModal,
   closeReactionModal,
+  closeSearchModal,
   closeImagePreview,
   closeServerSettingsModal,
   createChannelSubmit,
   deleteChannelButton,
   editChannelNameInput,
+  editChannelTopicInput,
+  editChannelPrivateInput,
+  editChannelMembersInput,
   editMessageInput,
   editMessageSubmit,
   emailInput,
-  encryptionPasswordInput,
   exitServerButton,
+  exportDataButton,
   imagePreviewModal,
   imageUpload,
+  fileUpload,
   loginButton,
   logoutButton,
   menuToggle,
@@ -34,6 +43,10 @@ import {
   messagesArea,
   reactionPicker,
   sendButton,
+  searchButton,
+  searchInput,
+  pinsButton,
+  clearQuoteButton,
   serverName,
   serverNameInput,
   sidebar,
@@ -56,14 +69,10 @@ import {
 
 import { signin, signout } from './auth.mjs';
 import { sendMessage, updateMessage } from './messages.mjs';
-import {
-  createChannel,
-  deleteChannel,
-  updateChannelName,
-  selectChannel
-} from './channels.mjs';
+import { createChannel, deleteChannel, updateChannelName, selectChannel } from './channels.mjs';
 import { addReaction, removeReaction } from './reactions.mjs';
 import { handleAddImages, openImagePreview } from './images.mjs';
+import { handleAddFiles } from './files.mjs';
 import { setTheme } from './theme.mjs';
 import { handleStart } from './start.mjs';
 import { setupMessageEvents } from './events.mjs';
@@ -74,7 +83,8 @@ import {
   updateServerName,
   openUserSettingsModal,
   closeUserSettingsModal,
-  updateUserName
+  updateUserName,
+  exportServerData
 } from './settings.mjs';
 import {
   closeAllModals,
@@ -90,6 +100,24 @@ import { apiRequest } from './api.mjs';
 import { openStartDmModal, closeStartDmModalFn } from './conversations.mjs';
 import { deleteDMMessage, updateDMMessage } from './dmMessages.mjs';
 import { hasUserReactedWithEmoji } from './utils.mjs';
+import { openSearchModal, runSearch } from './search.mjs';
+import { openPinsModal } from './pins.mjs';
+import { hideMentionSuggestions, updateMentionSuggestions } from './mentions.mjs';
+
+function resizeComposerInput() {
+  if (!messageInput) return;
+
+  const styles = getComputedStyle(messageInput);
+  const minHeight = Number.parseFloat(styles.minHeight) || 0;
+  const maxHeight = Number.parseFloat(styles.maxHeight) || 136;
+
+  messageInput.style.height = 'auto';
+
+  const naturalHeight = messageInput.value ? messageInput.scrollHeight : minHeight;
+  const nextHeight = Math.min(Math.max(naturalHeight, minHeight), maxHeight);
+  messageInput.style.height = `${nextHeight}px`;
+  messageInput.style.overflowY = messageInput.scrollHeight > maxHeight ? 'auto' : 'hidden';
+}
 
 /**
  * @description Initialize all event listeners
@@ -100,12 +128,12 @@ export function initializeListeners() {
 
   // Window events
   window.addEventListener('online', async () => {
-    if (state.currentChannelId)
-      await setupMessageEvents(state.currentChannelId);
+    if (state.currentChannelId) await setupMessageEvents(state.currentChannelId);
   });
 
   window.addEventListener('DOMContentLoaded', async () => {
     await handleStart();
+    resizeComposerInput();
   });
 
   // Document events
@@ -118,10 +146,7 @@ export function initializeListeners() {
   });
 
   document.addEventListener('keydown', (event) => {
-    if (
-      event.key === 'Escape' &&
-      imagePreviewModal.classList.contains('active')
-    ) {
+    if (event.key === 'Escape' && imagePreviewModal.classList.contains('active')) {
       imagePreviewModal.classList.remove('active');
     }
   });
@@ -153,10 +178,7 @@ export function initializeListeners() {
   // Auth listeners
   loginButton?.addEventListener('click', () => {
     const email = emailInput.value.trim();
-    const encryptionPassword = encryptionPasswordInput
-      ? encryptionPasswordInput.value?.trim()
-      : null;
-    signin(email, encryptionPassword);
+    signin(email);
   });
 
   logoutButton?.addEventListener('click', () => signout());
@@ -174,25 +196,49 @@ export function initializeListeners() {
     }
   });
 
-  encryptionPasswordInput?.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      loginButton.click();
-    }
-  });
-
   // Message listeners
-  sendButton?.addEventListener('click', () => {
+  sendButton?.addEventListener('click', async () => {
     const content = messageInput.value;
-    sendMessage(content);
+    try {
+      await sendMessage(content);
+    } finally {
+      resizeComposerInput();
+    }
   });
 
   messageInput?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       sendButton.click();
+      hideMentionSuggestions();
     }
   });
+  messageInput?.addEventListener('input', () => {
+    resizeComposerInput();
+    updateMentionSuggestions();
+  });
+  messageInput?.addEventListener('blur', () => {
+    setTimeout(() => hideMentionSuggestions(), 120);
+  });
+
+  clearQuoteButton?.addEventListener('click', async () => {
+    state.quotedMessage = null;
+    const { updateQuotedMessageUI } = await import('./ui.mjs');
+    updateQuotedMessageUI();
+  });
+
+  searchButton?.addEventListener('click', () => openSearchModal());
+  closeSearchModal?.addEventListener('click', () => closeAllModals());
+  searchInput?.addEventListener('input', () => runSearch(searchInput.value));
+  searchInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      runSearch(searchInput.value);
+    }
+  });
+
+  pinsButton?.addEventListener('click', () => openPinsModal());
+  closePinsModal?.addEventListener('click', () => closeAllModals());
 
   // Channel listeners
   addChannelButton?.addEventListener('click', () => openCreateChannelModal());
@@ -200,7 +246,12 @@ export function initializeListeners() {
   createChannelSubmit?.addEventListener('click', async () => {
     const name = channelNameInput.value.trim();
     if (name) {
-      await createChannel(name);
+      const members = await resolveMemberIds(channelMembersInput?.value || '');
+      await createChannel(name, {
+        topic: channelTopicInput?.value.trim() || undefined,
+        isPrivate: channelPrivateInput?.checked === true,
+        members
+      });
       closeCreateChannelModal();
     }
   });
@@ -215,10 +266,7 @@ export function initializeListeners() {
   closeChannelModal?.addEventListener('click', () => closeCreateChannelModal());
 
   deleteChannelButton?.addEventListener('click', async () => {
-    if (
-      state.currentChannelForEdit &&
-      confirm('Are you sure you want to delete this channel?')
-    ) {
+    if (state.currentChannelForEdit && confirm('Are you sure you want to delete this channel?')) {
       await deleteChannel(state.currentChannelForEdit.id);
       closeEditChannelModal();
     }
@@ -227,7 +275,12 @@ export function initializeListeners() {
   updateChannelSubmit?.addEventListener('click', async () => {
     const newName = editChannelNameInput.value.trim();
     if (newName && state.currentChannelForEdit) {
-      await updateChannelName(state.currentChannelForEdit.id, newName);
+      const members = await resolveMemberIds(editChannelMembersInput?.value || '');
+      await updateChannelName(state.currentChannelForEdit.id, newName, {
+        topic: editChannelTopicInput?.value.trim() || '',
+        isPrivate: editChannelPrivateInput?.checked === true,
+        members
+      });
       closeEditChannelModal();
     }
   });
@@ -239,9 +292,7 @@ export function initializeListeners() {
     }
   });
 
-  closeEditChannelModalEl?.addEventListener('click', () =>
-    closeEditChannelModal()
-  );
+  closeEditChannelModalEl?.addEventListener('click', () => closeEditChannelModal());
 
   // Edit message listeners
   editMessageSubmit?.addEventListener('click', async () => {
@@ -294,6 +345,13 @@ export function initializeListeners() {
     }
   });
 
+  fileUpload?.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+      handleAddFiles(e.target.files);
+      e.target.value = '';
+    }
+  });
+
   closeImagePreview?.addEventListener('click', () => {
     imagePreviewModal.classList.remove('active');
     const objectUrl = previewImage.getAttribute('data-object-url');
@@ -316,7 +374,13 @@ export function initializeListeners() {
   messagesArea?.addEventListener('drop', (e) => {
     e.preventDefault();
     messagesArea.classList.remove('drag-over');
-    if (e.dataTransfer.files.length > 0) handleAddImages(e.dataTransfer.files);
+    if (e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files);
+      const images = files.filter((file) => file.type.match('image.*'));
+      const otherFiles = files.filter((file) => !file.type.match('image.*'));
+      if (images.length > 0) handleAddImages(images);
+      if (otherFiles.length > 0) handleAddFiles(otherFiles);
+    }
   });
 
   messagesArea?.addEventListener('click', async (event) => {
@@ -334,8 +398,7 @@ export function initializeListeners() {
     if (editBtn) {
       const messageId = editBtn.dataset.messageId;
       const messageEl = event.target.closest('.message');
-      const content =
-        messageEl?.querySelector('.message-text')?.textContent || '';
+      const content = messageEl?.querySelector('.message-text')?.textContent || '';
       const images = [];
       messageEl?.querySelectorAll('.message-image').forEach((img) => {
         if (img.dataset.image) images.push(img.dataset.image);
@@ -349,9 +412,7 @@ export function initializeListeners() {
     }
 
     // DM message delete button
-    const deleteBtn = event.target.closest(
-      '.message-delete[data-is-dm="true"]'
-    );
+    const deleteBtn = event.target.closest('.message-delete[data-is-dm="true"]');
     if (deleteBtn) {
       const messageId = deleteBtn.dataset.messageId;
       if (confirm('Are you sure you want to delete this message?')) {
@@ -361,9 +422,28 @@ export function initializeListeners() {
     }
 
     // DM add reaction button
-    const addReactionBtn = event.target.closest(
-      '.add-reaction[data-message-id]'
-    );
+    const quoteDmBtn = event.target.closest('.quote-dm-message');
+    if (quoteDmBtn) {
+      const messageId = quoteDmBtn.dataset.messageId;
+      state.quotedMessage = state.messageCache.get(messageId);
+      const { updateQuotedMessageUI } = await import('./ui.mjs');
+      updateQuotedMessageUI();
+      messageInput?.focus();
+      return;
+    }
+
+    const copyDmBtn = event.target.closest('.copy-dm-message-link');
+    if (copyDmBtn) {
+      const messageId = copyDmBtn.dataset.messageId;
+      const url = `${window.location.origin}${window.location.pathname}#message-${messageId}`;
+      await navigator.clipboard.writeText(url);
+      const { showToast } = await import('./ui.mjs');
+      showToast('Message link copied');
+      return;
+    }
+
+    // DM add reaction button
+    const addReactionBtn = event.target.closest('.add-reaction[data-message-id]');
     if (addReactionBtn) {
       const messageId = addReactionBtn.dataset.messageId;
       state.currentMessageForReaction = messageId;
@@ -387,9 +467,7 @@ export function initializeListeners() {
     }
 
     // DM image removal button
-    const removeImageBtn = event.target.closest(
-      '.remove-image-btn[data-message-id]'
-    );
+    const removeImageBtn = event.target.closest('.remove-image-btn[data-message-id]');
     if (removeImageBtn) {
       event.stopPropagation();
       const messageId = removeImageBtn.dataset.messageId;
@@ -402,9 +480,13 @@ export function initializeListeners() {
             currentImages.push(img.dataset.image);
           }
         });
-        const content =
-          messageEl?.querySelector('.message-text')?.textContent || '';
-        await updateDMMessage(messageId, content, currentImages);
+        const content = messageEl?.querySelector('.message-text')?.textContent || '';
+        const hasFiles = Boolean(messageEl?.querySelector('.message-file'));
+        if (!content.trim() && currentImages.length === 0 && !hasFiles) {
+          await deleteDMMessage(messageId);
+        } else {
+          await updateDMMessage(messageId, content, currentImages);
+        }
       }
       return;
     }
@@ -430,9 +512,7 @@ export function initializeListeners() {
   // Server settings listeners
   serverName?.addEventListener('click', () => openServerSettingsModal());
 
-  closeServerSettingsModal?.addEventListener('click', () =>
-    hideServerSettingsModal()
-  );
+  closeServerSettingsModal?.addEventListener('click', () => hideServerSettingsModal());
 
   updateServerNameButton?.addEventListener('click', async () => {
     const name = serverNameInput.value.trim();
@@ -446,12 +526,12 @@ export function initializeListeners() {
     }
   });
 
+  exportDataButton?.addEventListener('click', () => exportServerData());
+
   // User settings listeners
   userSettingsButton?.addEventListener('click', () => openUserSettingsModal());
 
-  closeUserSettingsBtn?.addEventListener('click', () =>
-    closeUserSettingsModal()
-  );
+  closeUserSettingsBtn?.addEventListener('click', () => closeUserSettingsModal());
 
   userSettingsSaveBtn?.addEventListener('click', async () => {
     await updateUserName(userSettingsNameInput.value);
@@ -468,9 +548,7 @@ export function initializeListeners() {
   addUserButton?.addEventListener('click', async () => {
     const email = addEmailInput.value.trim();
     const password = addUserPasswordInput?.value?.trim() || '';
-    const role =
-      document.querySelector('input[name="user-role"]:checked')?.value ||
-      'user';
+    const role = document.querySelector('input[name="user-role"]:checked')?.value || 'user';
     if (email) {
       await addUser(email, role, password || undefined);
       addEmailInput.value = '';
@@ -509,4 +587,31 @@ export function initializeListeners() {
       await createWebhook(name, channelId);
     }
   });
+}
+
+async function resolveMemberIds(rawMembers) {
+  const tokens = rawMembers
+    .split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (tokens.length === 0) return [];
+
+  if (state.userCache.size === 0) {
+    const response = await apiRequest('/users');
+    for (const user of response.users || []) state.userCache.set(user.id, user);
+  }
+
+  const ids = [];
+  for (const token of tokens) {
+    const user = Array.from(state.userCache.values()).find(
+      (item) =>
+        item.id === token ||
+        item.email?.toLowerCase() === token ||
+        item.userName?.toLowerCase() === token
+    );
+    if (user) ids.push(user.id);
+  }
+
+  return [...new Set(ids)];
 }

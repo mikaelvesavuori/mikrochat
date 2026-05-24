@@ -31,6 +31,62 @@ export function processReactions(reactions) {
   return reactionsByEmoji;
 }
 
+function getMessageCacheKey(messageId) {
+  if (state.messageCache.has(messageId)) return messageId;
+
+  for (const [tempId, realId] of state.tempIdMap.entries()) {
+    if (realId === messageId && state.messageCache.has(tempId)) return tempId;
+  }
+
+  return null;
+}
+
+function getCachedMessage(messageId) {
+  const cacheKey = getMessageCacheKey(messageId);
+  return cacheKey ? state.messageCache.get(cacheKey) : null;
+}
+
+function setCachedMessage(messageId, message) {
+  const cacheKey = getMessageCacheKey(messageId) || message.id || messageId;
+  state.messageCache.set(cacheKey, message);
+}
+
+function getReactionUsersFromCache(messageId, reaction) {
+  const message = getCachedMessage(messageId);
+  if (!message?.reactions) return null;
+
+  return Object.entries(message.reactions)
+    .filter(([, reactions]) => Array.isArray(reactions) && reactions.includes(reaction))
+    .map(([userId]) => userId);
+}
+
+async function syncReactionFromCache(messageId, reaction) {
+  const userIds = getReactionUsersFromCache(messageId, reaction);
+  if (!userIds) return false;
+
+  const reactionsContainer = getReactionsContainerLocal(messageId);
+  if (!reactionsContainer) return true;
+
+  const existingReaction = reactionsContainer.querySelector(
+    `.reaction[data-reaction="${reaction}"]`
+  );
+  const userReacted = userIds.includes(state.currentUser?.id);
+
+  if (userIds.length === 0) {
+    existingReaction?.remove();
+    return true;
+  }
+
+  if (existingReaction) {
+    updateReactionCount(existingReaction, userIds.length);
+    reacted(existingReaction, userReacted);
+  } else {
+    await renderReaction(messageId, reaction, userIds.length, userReacted);
+  }
+
+  return true;
+}
+
 /**
  * @description User interaction leading to adding a reaction (emoji) to a message.
  */
@@ -45,23 +101,22 @@ export async function addReaction(messageId, reaction) {
   if (hasUserReactedWithEmoji(messageId, reaction)) return;
 
   try {
-    if (state.messageCache.has(messageId)) {
-      const cachedMessage = state.messageCache.get(messageId);
+    const cachedMessage = getCachedMessage(messageId);
+    if (cachedMessage) {
       if (!cachedMessage.reactions) cachedMessage.reactions = {};
 
-      if (!cachedMessage.reactions[reaction])
-        cachedMessage.reactions[reaction] = [state.currentUser.id];
-      else if (
-        !cachedMessage.reactions[reaction].includes(state.currentUser.id)
-      )
-        cachedMessage.reactions[reaction].push(state.currentUser.id);
+      const userReactions = cachedMessage.reactions[state.currentUser.id] || [];
+      if (!userReactions.includes(reaction)) {
+        cachedMessage.reactions[state.currentUser.id] = [...userReactions, reaction];
+      }
 
-      state.messageCache.set(messageId, cachedMessage);
+      setCachedMessage(messageId, cachedMessage);
     }
 
-    await apiRequest(`/messages/${actualId}/reactions`, 'POST', {
+    const response = await apiRequest(`/messages/${actualId}/reactions`, 'POST', {
       reaction
     });
+    if (response.message) setCachedMessage(messageId, response.message);
 
     await updateReactionInUI(messageId, reaction, true, false);
 
@@ -83,9 +138,22 @@ export async function removeReaction(messageId, reaction) {
   }
 
   try {
-    await apiRequest(`/messages/${actualId}/reactions`, 'DELETE', {
+    const cachedMessage = getCachedMessage(messageId);
+    if (cachedMessage) {
+      const userReactions = cachedMessage.reactions?.[state.currentUser.id] || [];
+      const nextReactions = userReactions.filter((item) => item !== reaction);
+
+      if (cachedMessage.reactions) {
+        if (nextReactions.length > 0) cachedMessage.reactions[state.currentUser.id] = nextReactions;
+        else delete cachedMessage.reactions[state.currentUser.id];
+        setCachedMessage(messageId, cachedMessage);
+      }
+    }
+
+    const response = await apiRequest(`/messages/${actualId}/reactions`, 'DELETE', {
       reaction
     });
+    if (response.message) setCachedMessage(messageId, response.message);
 
     await updateReactionInUI(messageId, reaction, false, false);
   } catch (error) {
@@ -105,6 +173,8 @@ export async function updateReactionInUI(
 ) {
   const reactionsContainer = getReactionsContainerLocal(messageId);
   if (!reactionsContainer) return;
+
+  if (await syncReactionFromCache(messageId, reaction)) return;
 
   const existingReaction = reactionsContainer.querySelector(
     `.reaction[data-reaction="${reaction}"]`

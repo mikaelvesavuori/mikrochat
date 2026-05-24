@@ -5,8 +5,16 @@ import { state } from './state.mjs';
 import { messagesArea, messageInput } from './dom.mjs';
 import { showToast, scrollToBottom } from './ui.mjs';
 import { apiRequest } from './api.mjs';
-import { formatMessageContent, formatMessageTime } from './messages.mjs';
+import {
+  createMessageQuoteHtml,
+  formatMessageContent,
+  formatMessageTime,
+  refreshQuotePreviewsForMessage,
+  renderAttachmentsInMessage
+} from './messages.mjs';
+import { clearPendingUploads, createImageUploadPayload } from './images.mjs';
 import { getInitials } from './utils.mjs';
+import { icon, reactionIcon } from './icons.mjs';
 
 const DM_PAGE_LIMIT = 50;
 let isLoadingMoreDMs = false;
@@ -43,8 +51,12 @@ export async function loadDMMessagesForConversation(conversationId, before) {
   } catch (error) {
     console.error('Failed to load DM messages:', error);
     if (!before) {
-      messagesArea.innerHTML =
-        '<div class="empty-state"><div class="empty-state-icon">!</div><h3>Failed to load messages</h3></div>';
+      messagesArea.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">${icon('exclamation-circle', 'icon empty-state-svg')}</div>
+          <h3>Failed to load messages</h3>
+        </div>
+      `;
     }
   }
 }
@@ -63,9 +75,9 @@ function prependDMMessages(messages) {
   for (const date of sortedDates) {
     const dayMessages = messagesByDate[date];
 
-    const existingDivider = Array.from(
-      messagesArea.querySelectorAll('.message-date-divider')
-    ).find((div) => div.textContent === date);
+    const existingDivider = Array.from(messagesArea.querySelectorAll('.message-date-divider')).find(
+      (div) => div.textContent === date
+    );
 
     if (!existingDivider) {
       const dateDivider = document.createElement('div');
@@ -77,6 +89,7 @@ function prependDMMessages(messages) {
     for (const message of dayMessages) {
       const el = createDMMessageElement(message);
       messagesArea.appendChild(el);
+      if (message.attachments) renderAttachmentsInMessage(message.id, message.attachments);
     }
   }
 }
@@ -122,7 +135,7 @@ export function renderDMMessages(messages) {
   if (messages.length === 0) {
     messagesArea.innerHTML = `
       <div class="empty-state">
-        <div class="empty-state-icon">@</div>
+        <div class="empty-state-icon">${icon('at-symbol', 'icon empty-state-svg')}</div>
         <h3>Start the conversation</h3>
         <p>Send a message to start chatting</p>
       </div>
@@ -131,6 +144,7 @@ export function renderDMMessages(messages) {
   }
 
   messagesArea.innerHTML = '';
+  for (const message of messages) state.messageCache.set(message.id, message);
 
   const messagesByDate = groupMessagesByDate(messages);
 
@@ -150,6 +164,7 @@ export function renderDMMessages(messages) {
     for (const message of dayMessages) {
       const el = createDMMessageElement(message);
       messagesArea.prepend(el);
+      if (message.attachments) renderAttachmentsInMessage(message.id, message.attachments);
     }
   }
 
@@ -204,6 +219,9 @@ export function renderDMMessage(message) {
   const initials = getInitials(message.author.userName);
   const time = formatMessageTime(message.createdAt);
   const content = formatMessageContent(message.content);
+  state.messageCache.set(message.id, message);
+  refreshQuotePreviewsForMessage(message.id);
+  const quoteHtml = createMessageQuoteHtml(message);
 
   // Render images if present
   let imagesHtml = '';
@@ -213,7 +231,7 @@ export function renderDMMessage(message) {
       imagesHtml += `
         <div class="message-image-container">
           <div class="image-wrapper">
-            ${isOwnMessage ? `<span class="remove-image-btn" data-message-id="${message.id}" data-image="${img}">&times;</span>` : ''}
+            ${isOwnMessage ? `<span class="remove-image-btn" data-message-id="${message.id}" data-image="${img}">${icon('x-mark')}</span>` : ''}
             <img src="/conversations/${state.currentConversationId}/messages/image/${img}?size=thumb" alt="Image" class="message-image" loading="lazy" data-image="${img}">
           </div>
         </div>
@@ -221,6 +239,11 @@ export function renderDMMessage(message) {
     }
     imagesHtml += '</div>';
   }
+
+  const filesHtml =
+    message.attachments && message.attachments.length > 0
+      ? '<div class="message-files-container"></div>'
+      : '';
 
   // Render reactions
   const reactionsHtml = renderDMReactions(message);
@@ -232,20 +255,31 @@ export function renderDMMessage(message) {
       <div class="message-actions">
         <button class="message-edit" data-message-id="${message.id}" data-is-dm="true">Edit</button>
         <button class="message-delete" data-message-id="${message.id}" data-is-dm="true">Delete</button>
+        <button class="quote-dm-message" data-message-id="${message.id}">Quote</button>
+        <button class="copy-dm-message-link" data-message-id="${message.id}">Copy Link</button>
+      </div>
+    `;
+  } else {
+    actionsHtml = `
+      <div class="message-actions">
+        <button class="quote-dm-message" data-message-id="${message.id}">Quote</button>
+        <button class="copy-dm-message-link" data-message-id="${message.id}">Copy Link</button>
       </div>
     `;
   }
 
   return `
-    <div class="message" data-id="${message.id}" data-is-dm="true">
+    <div class="message" id="message-${message.id}" data-id="${message.id}" data-is-dm="true">
       <div class="message-avatar">${initials}</div>
       <div class="message-content">
         <div class="message-header">
           <span class="message-author">${message.author.userName}</span>
           <span class="message-time">${time}</span>
         </div>
+        ${quoteHtml}
         <div class="message-text">${content}</div>
         ${imagesHtml}
+        ${filesHtml}
         ${reactionsHtml}
         ${actionsHtml}
       </div>
@@ -260,7 +294,7 @@ function renderDMReactions(message) {
   if (!message.reactions || Object.keys(message.reactions).length === 0) {
     return `
       <div class="message-reactions">
-        <div class="add-reaction" data-message-id="${message.id}">+</div>
+        <div class="add-reaction" data-message-id="${message.id}">${icon('plus', 'icon add-reaction-icon')}</div>
       </div>
     `;
   }
@@ -283,20 +317,18 @@ function renderDMReactions(message) {
   let html = '<div class="message-reactions">';
 
   for (const [emoji, count] of Object.entries(reactionCounts)) {
-    const hasUserReacted = userReactionMap[emoji].includes(
-      state.currentUser?.id
-    );
+    const hasUserReacted = userReactionMap[emoji].includes(state.currentUser?.id);
     html += `
       <div class="reaction ${hasUserReacted ? 'user-reacted' : ''}"
            data-message-id="${message.id}"
            data-reaction="${emoji}">
-        <span class="reaction-emoji">${emoji}</span>
+        <span class="reaction-symbol">${reactionIcon(emoji)}</span>
         <span class="reaction-count">${count}</span>
       </div>
     `;
   }
 
-  html += `<div class="add-reaction" data-message-id="${message.id}">+</div>`;
+  html += `<div class="add-reaction" data-message-id="${message.id}">${icon('plus', 'icon add-reaction-icon')}</div>`;
   html += '</div>';
 
   return html;
@@ -305,14 +337,19 @@ function renderDMReactions(message) {
 /**
  * @description Send a DM message.
  */
-export async function sendDMMessage(content, images = []) {
+export async function sendDMMessage(content, images = [], attachments = []) {
   if (!state.currentConversationId) return;
 
   try {
     const response = await apiRequest(
       `/conversations/${state.currentConversationId}/messages`,
       'POST',
-      { content, images }
+      {
+        content,
+        images,
+        attachments,
+        quotedMessageId: state.quotedMessage?.id
+      }
     );
 
     // Clear input
@@ -321,14 +358,10 @@ export async function sendDMMessage(content, images = []) {
       messageInput.style.height = 'auto';
     }
 
-    // Clear pending uploads
-    state.pendingUploads = [];
-    const pendingContainer = document.getElementById(
-      'pending-uploads-container'
-    );
-    const pendingUploads = document.getElementById('pending-uploads');
-    if (pendingContainer) pendingContainer.style.display = 'none';
-    if (pendingUploads) pendingUploads.innerHTML = '';
+    clearPendingUploads();
+    state.quotedMessage = null;
+    const { updateQuotedMessageUI } = await import('./ui.mjs');
+    updateQuotedMessageUI();
 
     return response.message;
   } catch (error) {
@@ -346,15 +379,7 @@ export async function uploadDMImage(fileData) {
   if (!state.currentConversationId) return null;
 
   try {
-    const base64 = await blobToBase64(fileData.blob);
-    const payload = {
-      filename: fileData.name,
-      image: base64
-    };
-
-    if (fileData.thumbnailBlob) {
-      payload.thumbnail = await blobToBase64(fileData.thumbnailBlob);
-    }
+    const payload = await createImageUploadPayload(fileData);
 
     const response = await apiRequest(
       `/conversations/${state.currentConversationId}/messages/image`,
@@ -368,21 +393,6 @@ export async function uploadDMImage(fileData) {
     showToast('Failed to upload image', 'error');
     return null;
   }
-}
-
-/**
- * @description Convert blob to base64.
- */
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result.split(',')[1];
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
 }
 
 /**
@@ -437,9 +447,7 @@ export function appendDMMessage(message) {
   }
 
   // Check if this message already exists
-  const existingEl = messagesArea.querySelector(
-    `.message[data-id="${message.id}"]`
-  );
+  const existingEl = messagesArea.querySelector(`.message[data-id="${message.id}"]`);
   if (existingEl) return;
 
   // Add to cache
@@ -466,6 +474,7 @@ export function appendDMMessage(message) {
   // Insert message at the visual bottom (first child due to column-reverse)
   const messageEl = createDMMessageElement(message);
   messagesArea.insertBefore(messageEl, messagesArea.firstChild);
+  if (message.attachments) renderAttachmentsInMessage(message.id, message.attachments);
 
   scrollToBottom();
 }
@@ -482,9 +491,7 @@ export function updateDMMessageInView(message) {
     return;
   }
 
-  const existingEl = messagesArea.querySelector(
-    `.message[data-id="${message.id}"]`
-  );
+  const existingEl = messagesArea.querySelector(`.message[data-id="${message.id}"]`);
   if (!existingEl) return;
 
   // Update cache
@@ -497,23 +504,18 @@ export function updateDMMessageInView(message) {
 
   // Replace message element
   existingEl.replaceWith(createDMMessageElement(message));
+  if (message.attachments) renderAttachmentsInMessage(message.id, message.attachments);
 }
 
 /**
  * @description Remove a DM message from the view (from SSE).
  */
 export function removeDMMessageFromView(messageId, conversationId) {
-  if (
-    !messagesArea ||
-    state.viewMode !== 'dm' ||
-    state.currentConversationId !== conversationId
-  ) {
+  if (!messagesArea || state.viewMode !== 'dm' || state.currentConversationId !== conversationId) {
     return;
   }
 
-  const existingEl = messagesArea.querySelector(
-    `.message[data-id="${messageId}"]`
-  );
+  const existingEl = messagesArea.querySelector(`.message[data-id="${messageId}"]`);
   if (existingEl) {
     existingEl.remove();
   }
@@ -527,7 +529,7 @@ export function removeDMMessageFromView(messageId, conversationId) {
   if (filtered.length === 0) {
     messagesArea.innerHTML = `
       <div class="empty-state">
-        <div class="empty-state-icon">@</div>
+        <div class="empty-state-icon">${icon('at-symbol', 'icon empty-state-svg')}</div>
         <h3>Start the conversation</h3>
         <p>Send a message to start chatting</p>
       </div>

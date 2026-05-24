@@ -1,1 +1,0 @@
-closeEditModalEl.addEventListener('click', closeEditModal);

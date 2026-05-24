@@ -31,6 +31,7 @@ describe('configDefaults', () => {
     vi.stubEnv('EMAIL_HOST', '');
     vi.stubEnv('EMAIL_PASSWORD', '');
     vi.stubEnv('STORAGE_KEY', '');
+    vi.stubEnv('MIKROCHAT_PORT', '');
     vi.stubEnv('PORT', '');
     vi.stubEnv('HOST', '');
     vi.stubEnv('INITIAL_USER_ID', '');
@@ -74,9 +75,9 @@ describe('configDefaults', () => {
       expect(config.auth.maxActiveSessions).toBe(3);
     });
 
-    it('should default appUrl to "http://127.0.0.1:3000"', () => {
+    it('should default appUrl to "http://127.0.0.1:8000"', () => {
       const config = configDefaults();
-      expect(config.auth.appUrl).toBe('http://127.0.0.1:3000');
+      expect(config.auth.appUrl).toBe('http://127.0.0.1:8000');
     });
 
     it('should use APP_URL env var when set', () => {
@@ -186,9 +187,16 @@ describe('configDefaults', () => {
       expect(config.server.port).toBe(8080);
     });
 
-    it('should default host to "localhost"', () => {
+    it('should use MIKROCHAT_PORT env var before PORT when set', () => {
+      vi.stubEnv('MIKROCHAT_PORT', '4003');
+      vi.stubEnv('PORT', '8080');
       const config = configDefaults();
-      expect(config.server.host).toBe('localhost');
+      expect(config.server.port).toBe(4003);
+    });
+
+    it('should default host to "127.0.0.1"', () => {
+      const config = configDefaults();
+      expect(config.server.host).toBe('127.0.0.1');
     });
 
     it('should use HOST env var when set', () => {
@@ -222,7 +230,7 @@ describe('configDefaults', () => {
       });
     });
 
-    it('should set allowedDomains to localhost:8000', () => {
+    it('should set allowedDomains to 127.0.0.1:8000', () => {
       const config = configDefaults();
       expect(config.server.allowedDomains).toEqual(['http://127.0.0.1:8000']);
     });

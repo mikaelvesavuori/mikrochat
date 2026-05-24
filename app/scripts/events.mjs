@@ -7,11 +7,7 @@ import {
   updateDocumentTitle,
   showDesktopNotification
 } from './ui.mjs';
-import {
-  appendMessage,
-  updateMessageInUI,
-  removeMessageFromUI
-} from './messages.mjs';
+import { appendMessage, updateMessageInUI, removeMessageFromUI } from './messages.mjs';
 import { updateReactionInUI } from './reactions.mjs';
 import { loadChannels } from './channels.mjs';
 import {
@@ -19,11 +15,7 @@ import {
   updateConversationInCache,
   incrementDmUnread
 } from './conversations.mjs';
-import {
-  appendDMMessage,
-  updateDMMessageInView,
-  removeDMMessageFromView
-} from './dmMessages.mjs';
+import { appendDMMessage, updateDMMessageInView, removeDMMessageFromView } from './dmMessages.mjs';
 
 // Event-specific globals
 const MAX_SSE_RECONNECT_ATTEMPTS = 5;
@@ -52,9 +44,7 @@ export async function setupMessageEvents(channelId) {
 
   try {
     // Create new SSE connection
-    state.messageEventSource = new EventSource(
-      `${API_BASE_URL}/events?token=${token}`
-    );
+    state.messageEventSource = new EventSource(`${API_BASE_URL}/events?token=${token}`);
 
     // Connection opened successfully
     state.messageEventSource.onopen = function () {
@@ -67,8 +57,7 @@ export async function setupMessageEvents(channelId) {
       try {
         const data = JSON.parse(event.data);
 
-        if (DEBUG_MODE)
-          console.log(`SSE event received: ${data.type}`, data.payload);
+        if (DEBUG_MODE) console.log(`SSE event received: ${data.type}`, data.payload);
 
         switch (data.type) {
           case 'CONNECTED':
@@ -78,10 +67,14 @@ export async function setupMessageEvents(channelId) {
             // If message is for current channel, append it
             if (data.payload.channelId === state.currentChannelId) {
               await appendMessage(data.payload);
+              if (isMentioned(data.payload)) {
+                const authorName = data.payload.author?.userName || 'Someone';
+                showToast(`${authorName} mentioned you`, 'info');
+                showDesktopNotification('Mention', `${authorName}: ${data.payload.content}`);
+              }
             } else {
               // Otherwise, increment the unread count
-              const currentCount =
-                state.unreadCounts.get(data.payload.channelId) || 0;
+              const currentCount = state.unreadCounts.get(data.payload.channelId) || 0;
               state.unreadCounts.set(data.payload.channelId, currentCount + 1);
 
               // Find the channel in the list and update it
@@ -89,12 +82,16 @@ export async function setupMessageEvents(channelId) {
                 `.channel-item[data-id="${data.payload.channelId}"]`
               );
               if (channelEl) {
-                const channelName =
-                  channelEl.querySelector('.channel-name').textContent;
-                await renderChannelItem({
-                  id: data.payload.channelId,
-                  name: channelName
-                });
+                const channelName = channelEl
+                  .querySelector('.channel-name')
+                  .textContent.trim();
+                const channel = state.channelCache.get(data.payload.channelId);
+                await renderChannelItem(
+                  channel || {
+                    id: data.payload.channelId,
+                    name: channelName
+                  }
+                );
               }
 
               // Show toast notification for the message
@@ -102,10 +99,18 @@ export async function setupMessageEvents(channelId) {
               const channelName = channelEl
                 ? channelEl.querySelector('.channel-name').textContent
                 : 'another channel';
-              showToast(`${authorName} posted in #${channelName}`, 'info');
+              const cleanChannelName = channelName.trim();
+              showToast(
+                isMentioned(data.payload)
+                  ? `${authorName} mentioned you in #${cleanChannelName}`
+                  : `${authorName} posted in #${cleanChannelName}`,
+                'info'
+              );
               updateDocumentTitle();
               showDesktopNotification(
-                `#${channelName}`,
+                isMentioned(data.payload)
+                  ? `Mention in #${cleanChannelName}`
+                  : `#${cleanChannelName}`,
                 `${authorName}: ${data.payload.content}`
               );
             }
@@ -116,9 +121,7 @@ export async function setupMessageEvents(channelId) {
               if (state.messageCache.has(data.payload.id)) {
                 state.messageCache.set(data.payload.id, {
                   ...state.messageCache.get(data.payload.id),
-                  content: data.payload.content,
-                  images: data.payload.images,
-                  updatedAt: data.payload.updatedAt
+                  ...data.payload
                 });
               }
               await updateMessageInUI(data.payload);
@@ -137,6 +140,7 @@ export async function setupMessageEvents(channelId) {
             break;
 
           case 'UPDATE_CHANNEL':
+            state.channelCache.set(data.payload.id, data.payload);
             loadChannels();
             // Update header if we're viewing the renamed channel
             if (data.payload.id === state.currentChannelId) {
@@ -146,6 +150,7 @@ export async function setupMessageEvents(channelId) {
             break;
 
           case 'DELETE_CHANNEL':
+            state.channelCache.delete(data.payload.id);
             loadChannels();
             break;
 
@@ -155,8 +160,21 @@ export async function setupMessageEvents(channelId) {
               const messageId = data.payload.messageId;
               const userId = data.payload.userId;
               const reaction = data.payload.reaction;
+              let didChangeCachedReaction = !state.messageCache.has(messageId);
 
-              if (userId !== state.currentUser.id)
+              if (state.messageCache.has(messageId)) {
+                const cachedMsg = state.messageCache.get(messageId);
+                if (!cachedMsg.reactions) cachedMsg.reactions = {};
+
+                const userReactions = cachedMsg.reactions[userId] || [];
+                if (!userReactions.includes(reaction)) {
+                  cachedMsg.reactions[userId] = [...userReactions, reaction];
+                  state.messageCache.set(messageId, cachedMsg);
+                  didChangeCachedReaction = true;
+                }
+              }
+
+              if (didChangeCachedReaction && userId !== state.currentUser.id)
                 await updateReactionInUI(messageId, reaction, true, true);
             }
             break;
@@ -167,41 +185,60 @@ export async function setupMessageEvents(channelId) {
               const messageId = data.payload.messageId;
               const userId = data.payload.userId;
               const reaction = data.payload.reaction;
+              let didChangeCachedReaction = !state.messageCache.has(messageId);
 
               // Update cache regardless of who triggered it
               if (state.messageCache.has(messageId)) {
                 const cachedMsg = state.messageCache.get(messageId);
-                if (cachedMsg.reactions?.[reaction]) {
-                  cachedMsg.reactions[reaction] = cachedMsg.reactions[
-                    reaction
-                  ].filter((id) => id !== userId);
-                  if (cachedMsg.reactions[reaction].length === 0) {
-                    delete cachedMsg.reactions[reaction];
+                if (cachedMsg.reactions?.[userId]) {
+                  const hadReaction = cachedMsg.reactions[userId].includes(reaction);
+                  cachedMsg.reactions[userId] = cachedMsg.reactions[userId].filter(
+                    (item) => item !== reaction
+                  );
+                  if (cachedMsg.reactions[userId].length === 0) {
+                    delete cachedMsg.reactions[userId];
                   }
                   state.messageCache.set(messageId, cachedMsg);
+                  didChangeCachedReaction = hadReaction;
                 }
               }
 
-              if (userId !== state.currentUser.id)
+              if (didChangeCachedReaction && userId !== state.currentUser.id)
                 await updateReactionInUI(messageId, reaction, false, true);
+            }
+            break;
+
+          case 'NEW_USER':
+            if (document.getElementById('server-settings-modal')?.classList.contains('active')) {
+              const { loadUsers } = await import('./users.mjs');
+              loadUsers();
             }
             break;
 
           case 'REMOVE_USER':
             if (data.payload.id === state.currentUser.id) {
               await signout();
+            } else if (
+              document.getElementById('server-settings-modal')?.classList.contains('active')
+            ) {
+              const { loadUsers } = await import('./users.mjs');
+              loadUsers();
             }
             break;
 
           case 'UPDATE_USER':
             if (data.payload.id === state.currentUser.id) {
               state.currentUser.userName = data.payload.userName;
+              state.currentUser.isAdmin = data.payload.isAdmin;
               const { getInitials } = await import('./utils.mjs');
               document.getElementById('user-avatar').textContent = getInitials(
                 data.payload.userName
               );
-              document.getElementById('user-name').textContent =
-                data.payload.userName;
+              document.getElementById('user-name').textContent = data.payload.userName;
+            }
+            if (document.getElementById('server-settings-modal')?.classList.contains('active')) {
+              const { loadUsers } = await import('./users.mjs');
+              loadUsers();
             }
             break;
 
@@ -227,10 +264,7 @@ export async function setupMessageEvents(channelId) {
                 const authorName = data.payload.author?.userName || 'Someone';
                 showToast(`${authorName} sent you a direct message`, 'info');
                 updateDocumentTitle();
-                showDesktopNotification(
-                  'Direct Message',
-                  `${authorName}: ${data.payload.content}`
-                );
+                showDesktopNotification('Direct Message', `${authorName}: ${data.payload.content}`);
               }
 
               // Update conversation's lastMessageAt
@@ -250,30 +284,21 @@ export async function setupMessageEvents(channelId) {
 
           case 'DELETE_DM_MESSAGE':
             if (data.payload.conversationId) {
-              removeDMMessageFromView(
-                data.payload.id,
-                data.payload.conversationId
-              );
+              removeDMMessageFromView(data.payload.id, data.payload.conversationId);
             }
             break;
 
           case 'NEW_THREAD_REPLY': {
-            const { appendThreadReply, updateThreadBadge } = await import(
-              './threads.mjs'
-            );
+            const { appendThreadReply, updateThreadBadge } = await import('./threads.mjs');
 
             if (data.payload.channelId === state.currentChannelId) {
-              updateThreadBadge(
-                data.payload.parentMessageId,
-                data.payload.threadMeta
-              );
+              updateThreadBadge(data.payload.parentMessageId, data.payload.threadMeta);
             }
 
             appendThreadReply(data.payload.reply);
 
             if (data.payload.reply.author.id !== state.currentUser.id) {
-              const authorName =
-                data.payload.reply.author?.userName || 'Someone';
+              const authorName = data.payload.reply.author?.userName || 'Someone';
               showToast(`${authorName} replied in a thread`, 'info');
               showDesktopNotification(
                 'Thread Reply',
@@ -290,10 +315,9 @@ export async function setupMessageEvents(channelId) {
           }
 
           case 'DELETE_THREAD_REPLY': {
-            const {
-              removeThreadReplyFromView,
-              updateThreadBadge: updateBadge
-            } = await import('./threads.mjs');
+            const { removeThreadReplyFromView, updateThreadBadge: updateBadge } = await import(
+              './threads.mjs'
+            );
 
             if (data.payload.channelId === state.currentChannelId) {
               updateBadge(data.payload.threadId, data.payload.threadMeta);
@@ -305,20 +329,19 @@ export async function setupMessageEvents(channelId) {
 
           case 'UPDATE_SERVER_SETTINGS':
             if (data.payload.name) {
-              const serverNameText =
-                document.querySelector('.server-name-text');
-              if (serverNameText)
-                serverNameText.textContent = data.payload.name;
+              const serverNameText = document.querySelector('.server-name-text');
+              if (serverNameText) serverNameText.textContent = data.payload.name;
             }
+            break;
+
+          case 'PRESENCE_UPDATE':
+            state.presence.set(data.payload.userId, data.payload);
+            updatePresenceIndicators();
             break;
 
           case 'NEW_WEBHOOK':
           case 'DELETE_WEBHOOK': {
-            if (
-              document
-                .getElementById('server-settings-modal')
-                ?.classList.contains('active')
-            ) {
+            if (document.getElementById('server-settings-modal')?.classList.contains('active')) {
               const { loadWebhooks } = await import('./webhooks.mjs');
               loadWebhooks();
             }
@@ -333,10 +356,7 @@ export async function setupMessageEvents(channelId) {
     state.messageEventSource.onerror = function (_error) {
       if (sseErrorsReported < MAX_SSE_ERRORS_REPORTED) sseErrorsReported++;
 
-      if (
-        state.messageEventSource &&
-        state.messageEventSource.readyState === EventSource.CLOSED
-      ) {
+      if (state.messageEventSource && state.messageEventSource.readyState === EventSource.CLOSED) {
         state.messageEventSource.close();
         state.messageEventSource = null;
 
@@ -344,16 +364,12 @@ export async function setupMessageEvents(channelId) {
         const delay = Math.min(1000 * 2 ** sseReconnectAttempts, 30 * 1000);
 
         if (sseReconnectAttempts <= MAX_SSE_RECONNECT_ATTEMPTS) {
-          console.log(
-            `SSE reconnect attempt ${sseReconnectAttempts} in ${delay}ms`
-          );
+          console.log(`SSE reconnect attempt ${sseReconnectAttempts} in ${delay}ms`);
           sseReconnectTimeout = setTimeout(async () => {
             await setupMessageEvents(channelId);
           }, delay);
         } else {
-          console.log(
-            'Maximum SSE reconnect attempts reached, trying again in 60s'
-          );
+          console.log('Maximum SSE reconnect attempts reached, trying again in 60s');
           sseReconnectAttempts = 0;
           sseReconnectTimeout = setTimeout(async () => {
             await setupMessageEvents(channelId);
@@ -364,6 +380,26 @@ export async function setupMessageEvents(channelId) {
   } catch (error) {
     console.error('Error setting up SSE connection', error);
   }
+}
+
+function isMentioned(message) {
+  if (!state.currentUser || message.author?.id === state.currentUser.id) return false;
+
+  const mentions = message.mentions || [];
+  return (
+    mentions.includes(state.currentUser.id) ||
+    mentions.includes('@channel') ||
+    mentions.includes('@here')
+  );
+}
+
+function updatePresenceIndicators() {
+  document.querySelectorAll('.dm-item').forEach((item) => {
+    const conversation = state.conversationCache.get(item.dataset.conversationId);
+    const userId = conversation?.otherUser?.id;
+    const presence = userId ? state.presence.get(userId) : null;
+    item.dataset.presence = presence?.status || 'offline';
+  });
 }
 
 /**

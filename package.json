@@ -1,7 +1,7 @@
 {
   "name": "mikrochat",
   "description": "The minimalist chat app that's all yours",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "author": "Mikael Vesavuori",
   "license": "MIT",
   "keywords": [
@@ -11,8 +11,8 @@
     "discord-replacement",
     "teams-replacement"
   ],
-  "main": "lib/index.js",
-  "module": "lib/index.mjs",
+  "main": "lib/mikrochat.mjs",
+  "module": "lib/mikrochat.mjs",
   "sideEffects": [
     "./app/scripts/*.mjs"
   ],
@@ -30,51 +30,69 @@
     "!/tests"
   ],
   "scripts": {
-    "start": "npx tsx src/index.ts",
-    "dev": "npx http-server -p 8000 ./app",
-    "dev:https": "npx http-server -p 8000 -S -C cert.pem ./app",
-    "dev:reload": "npm run build:web && mv dist/mikrochat.min.js app && clear && npm start",
-    "test": "npm run lint && npm run test:unit",
-    "test:unit": "npx vitest run --coverage",
-    "test:watch": "npx vitest --watch",
-    "release": "bash release.sh",
+    "start": "npm run dev",
+    "dev": "npm run build:web && concurrently \"npm run dev:web:serve\" \"npm run dev:api\"",
+    "dev:web": "npm run build:web && npm run dev:web:serve",
+    "dev:web:serve": "http-server dist -a ${HOST:-127.0.0.1} -p ${PORT:-8000} -c-1",
+    "dev:api": "tsx src/index.ts",
+    "dev:https": "npm run build:web && http-server dist -a ${HOST:-127.0.0.1} -p ${PORT:-8000} -S -C cert.pem -c-1",
+    "dev:reload": "npm run build:web && cp dist/mikrochat.min.js app/mikrochat.min.js && clear && npm run dev:api",
+    "docs": "npm run docs:install && npm --prefix docs run dev",
+    "docs:build": "npm run docs:install && npm --prefix docs run build",
+    "docs:preview": "npm run docs:install && npm --prefix docs run preview",
+    "test": "vitest run --config vitest.config.mts --coverage",
+    "test:watch": "vitest --config vitest.config.mts",
+    "typecheck": "tsc --noEmit",
+    "release": "npm run build && npm run sbom && npm run scan && npm run licenses && npm run release:assets",
     "deploy": "npm run deploy:frontend && npm run deploy:backend",
     "deploy:backend": "bash .deployment/deploy-backend.sh",
     "deploy:frontend": "bash .deployment/deploy-frontend.sh",
     "build": "npm run clean && npm run build:web && npm run build:api",
     "build:api": "node esbuild.config.mjs",
-    "build:web": "rm -rf dist && mkdir dist && node build.mjs && npm run move:webapp:files",
-    "move:webapp:files": "cp -R icons dist && cp app/config.js dist && cp app/mikrosafe.min.js dist && cp app/manifest.json dist && cp app/offline.html dist && cp app/pwa.js dist && cp app/service-worker.js dist",
-    "clean": "rm -rf lib && rm -rf dist && mkdir lib",
-    "lint": "npx @biomejs/biome check --write ./src ./app",
-    "licenses": "npx license-checker-rseidelsohn --production --plainVertical --excludePackagesStartingWith \"molnos;esbuild;@esbuild\" --out oss-licenses.txt",
-    "sbom": "syft file:package-lock.json --output spdx-json > ./sbom.json",
-    "scan": "grype ./sbom.json -o json",
+    "build:web": "node build.mjs",
+    "assets": "node ../../scripts/generate-product-icons.mjs --product mikrochat",
+    "clean": "node -e \"const fs=require('node:fs');for (const path of ['lib','dist']) fs.rmSync(path,{recursive:true,force:true});fs.mkdirSync('lib',{recursive:true})\"",
+    "lint": "biome lint app src tests scripts build.mjs esbuild.config.mjs vitest.config.mts package.json tsconfig.json tsconfig.build.json biome.json mikrochat.config.example.json",
+    "lint:fix": "biome lint app src tests scripts build.mjs esbuild.config.mjs vitest.config.mts package.json tsconfig.json tsconfig.build.json biome.json mikrochat.config.example.json --write",
+    "format": "biome format --write app src tests scripts build.mjs esbuild.config.mjs vitest.config.mts package.json tsconfig.json tsconfig.build.json biome.json mikrochat.config.example.json",
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run build && npm run docs:build",
+    "licenses": "mkdir -p security && grant check security/sbom.spdx.json --config .grant.yaml > security/grant-report.txt || { cat security/grant-report.txt; exit 1; }",
+    "sbom": "node scripts/create-prod-sbom.mjs",
+    "scan": "mkdir -p security && grype sbom:security/sbom.spdx.json -o json > security/grype-report.json",
     "package": "npm pack",
-    "prepublishOnly": "npm run build",
-    "prepare": "husky"
+    "prepublishOnly": "npm run verify",
+    "prepare": "husky",
+    "release:assets": "node scripts/create-release-assets.mjs",
+    "precommit": "npm run lint && npm run typecheck && npm run test",
+    "docs:install": "npm --prefix docs ci"
   },
   "devDependencies": {
-    "@biomejs/biome": "2",
-    "@types/node": "latest",
+    "@biomejs/biome": "2.4.15",
+    "@types/node": "25",
     "@vitest/coverage-v8": "4",
+    "concurrently": "latest",
     "esbuild": "latest",
     "html-minifier-terser": "7",
     "http-server": "14",
-    "husky": "9",
+    "husky": "9.1.7",
     "license-checker-rseidelsohn": "4",
     "lightningcss": "1",
-    "tsup": "8",
     "tsx": "4",
-    "typescript": "5",
+    "typescript": "6",
     "vitest": "4",
     "wrangler": "4"
   },
   "dependencies": {
-    "mikroauth": "latest",
-    "mikroconf": "latest",
-    "mikroid": "latest",
-    "mikroserve": "latest",
-    "pikodb": "latest"
-  }
+    "mikroauth": "1",
+    "mikroconf": "1",
+    "mikroid": "1",
+    "mikroserve": "1",
+    "pikodb": "1"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "workspaces": [
+    "docs"
+  ]
 }

@@ -1,14 +1,12 @@
 name: Release
 
-permissions:
-  contents: read
-  packages: write
-  id-token: write
-
 on:
   push:
     tags:
       - "v*"
+
+permissions:
+  contents: write
 
 jobs:
   release:
@@ -20,27 +18,21 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24
-          registry-url: 'https://registry.npmjs.org'
+          node-version: 25
+          cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Compile
-        run: npx tsc
-
-      - name: Test
-        run: npm test
+      - name: Verify
+        run: npm run verify
 
       - name: Extract version from tag
         id: version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
-
-      - name: Build artifact
-        run: npm run build
 
       - name: Install Syft
         run: curl -sSfL https://get.anchore.io/syft | sudo sh -s -- -b /usr/local/bin
@@ -51,35 +43,49 @@ jobs:
       - name: Install Grant
         run: curl -sSfL https://get.anchore.io/grant | sudo sh -s -- -b /usr/local/bin
 
-      - name: Run Syft
+      - name: Generate SBOM
         run: npm run sbom
 
-      - name: Run Grype
+      - name: Run vulnerability scan
         run: npm run scan
 
-      - name: Run Grant
+      - name: Run license check
         run: npm run licenses
 
-      - name: Build versioned and latest release copies
-        run: bash release.sh
+      - name: Create release ZIPs
+        run: npm run release:assets -- "${{ steps.version.outputs.version }}"
+
+      - name: Upload GitHub workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mikrochat-release-${{ steps.version.outputs.version }}
+          path: release/*.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: |
+            release/*.zip
+            release/SHA256SUMS.txt
 
       - name: Install Wrangler
+        if: ${{ vars.CLOUDFLARE_R2_BUCKET_NAME != '' }}
         run: npm install -g wrangler
 
-      - name: Upload to Cloudflare R2
+      - name: Upload release assets to Cloudflare R2
+        if: ${{ vars.CLOUDFLARE_R2_BUCKET_NAME != '' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          wrangler r2 object put ${{ vars.CLOUDFLARE_R2_BUCKET_NAME }}/mikrochat_${VERSION}.zip --file=mikrochat_${VERSION}.zip --jurisdiction=eu --remote
-          wrangler r2 object put ${{ vars.CLOUDFLARE_R2_BUCKET_NAME }}/mikrochat_latest.zip --file=mikrochat_latest.zip --jurisdiction=eu --remote
-          wrangler r2 object put ${{ vars.CLOUDFLARE_R2_BUCKET_NAME }}/install.sh --file=install.sh --jurisdiction=eu --remote
+          product="$(node -p 'require("./package.json").name')"
 
-      #- name: Publish to NPM
-      #  run: npm publish --access public
+          for file in release/*.zip; do
+            name="$(basename "$file")"
+            wrangler r2 object put "${{ vars.CLOUDFLARE_R2_BUCKET_NAME }}/$name" --file="$file" --jurisdiction=eu --remote
+          done
 
-      - name: Notify backoffice API
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          curl -X POST https://api.mikrochat.com/version?version=${VERSION} -H "Authorization: ${{ secrets.MIKROCHAT_BACKOFFICE_API_KEY }}"
+          if [ -f release/SHA256SUMS.txt ]; then
+            wrangler r2 object put "${{ vars.CLOUDFLARE_R2_BUCKET_NAME }}/${product}_SHA256SUMS.txt" --file="release/SHA256SUMS.txt" --jurisdiction=eu --remote
+          fi

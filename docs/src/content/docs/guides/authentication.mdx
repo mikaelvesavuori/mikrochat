@@ -1,0 +1,485 @@
+---
+title: Authentication
+description: Understanding MikroChat's authentication modes and security.
+---
+
+MikroChat supports multiple authentication modes: a simple local mode for private testing, magic link authentication, password-based authentication, and OAuth 2.0 sign-in with external providers (Google, Microsoft, GitHub, GitLab, or custom).
+
+## Authentication Modes
+
+### Local Mode
+
+Local mode provides simple email-based authentication without sending actual emails. Enter an email address, and you're signed in immediately.
+
+**When to use:** Private local testing only.
+
+**Configuration:**
+
+Backend (`mikrochat.config.json`):
+
+```json
+{
+  "auth": {
+    "authMode": "dev",
+    "jwtSecret": "any-secret-key",
+    "appUrl": "http://127.0.0.1:8000",
+    "isInviteRequired": false
+  }
+}
+```
+
+The frontend detects dev mode from `GET /config.json`; no auth mode value is needed in `config.js`.
+
+:::danger[Never use local mode in production]
+Local mode has no real authentication. Anyone who knows an email address can sign in as that user.
+:::
+
+### Magic Link Authentication
+
+Magic link authentication sends a one-time login link to the user's email. Clicking the link signs them in securely without a password.
+
+**When to use:** Production deployments.
+
+**Configuration:**
+
+Backend (`mikrochat.config.json`):
+
+```json
+{
+  "auth": {
+    "jwtSecret": "your-strong-random-secret-key",
+    "authMode": "magic-link",
+    "appUrl": "https://chat.example.com",
+    "isInviteRequired": true,
+    "magicLinkExpirySeconds": 900,
+    "jwtExpirySeconds": 900,
+    "refreshTokenExpirySeconds": 604800,
+    "maxActiveSessions": 3
+  },
+  "email": {
+    "user": "noreply@example.com",
+    "host": "smtp.example.com",
+    "password": "smtp-password",
+    "port": 465,
+    "secure": true
+  }
+}
+```
+
+The frontend detects magic-link mode from `GET /config.json`; no auth mode value is needed in `config.js`.
+
+### Password Authentication
+
+Password authentication provides traditional email and password login. It works with or without an email provider — when email is not configured, admins manage user passwords directly.
+
+**When to use:** Production deployments where you prefer traditional credentials over passwordless login.
+
+**Configuration:**
+
+Backend (`mikrochat.config.json`):
+
+```json
+{
+  "auth": {
+    "jwtSecret": "your-strong-random-secret-key",
+    "appUrl": "https://chat.example.com",
+    "authMode": "password",
+    "isInviteRequired": false,
+    "jwtExpirySeconds": 900,
+    "refreshTokenExpirySeconds": 604800,
+    "maxActiveSessions": 3
+  },
+  "chat": {
+    "initialUser": {
+      "userName": "admin",
+      "email": "admin@example.com",
+      "password": "change-me-on-first-login"
+    }
+  }
+}
+```
+
+The `initialUser.password` field sets the admin's password on first server start. Without it (or without email configured), the initial admin has no way to sign in. You can also set this via the `INITIAL_USER_PASSWORD` environment variable.
+
+Email configuration is optional in password mode. Add it if you want email-based invite links and self-service password reset:
+
+```json
+{
+  "email": {
+    "user": "noreply@example.com",
+    "host": "smtp.example.com",
+    "password": "smtp-password",
+    "port": 465,
+    "secure": true
+  }
+}
+```
+
+The frontend detects password mode and email availability from `GET /config.json`. When email is not configured, the "Forgot password?" link is hidden and the admin add-user form shows a password field so the admin can set initial passwords directly.
+
+### OAuth 2.0 Authentication
+
+OAuth authentication lets users sign in with external identity providers like Google, Microsoft, GitHub, or GitLab. It can also be configured with any custom OAuth 2.0 compliant provider (e.g. Keycloak, Authentik).
+
+OAuth works **alongside** other authentication modes -- you can offer OAuth sign-in together with magic link or password authentication.
+
+**When to use:** Production deployments where you want users to sign in with their existing accounts from a trusted identity provider.
+
+**Configuration:**
+
+Backend (`mikrochat.config.json`):
+
+```json
+{
+  "auth": {
+    "jwtSecret": "your-strong-random-secret-key",
+    "authMode": "magic-link",
+    "appUrl": "https://chat.example.com",
+    "isInviteRequired": true
+  },
+  "oauth": {
+    "presets": {
+      "google": {
+        "clientId": "your-google-client-id",
+        "clientSecret": "your-google-client-secret",
+        "redirectUri": "https://chat.example.com/auth/oauth/google/callback"
+      }
+    }
+  }
+}
+```
+
+When OAuth providers are configured, the login screen fetches available providers from the backend and renders "Sign in with ..." buttons. If no providers are configured on the backend, the buttons are simply not shown. See the [Frontend Configuration guide](../guides/configuration#enabling-oauth-sign-in) for full details.
+
+## How OAuth Authentication Works
+
+### Flow
+
+1. User clicks "Sign in with Google" (or another provider)
+2. Browser is redirected to `GET /auth/oauth/:providerId`
+3. Server generates a CSRF state token and redirects to the provider's authorization page
+4. User authenticates with the provider and grants consent
+5. Provider redirects back to `/auth/oauth/:providerId/callback` with an authorization code
+6. Server validates the CSRF state, exchanges the code for provider tokens, and fetches the user's profile
+7. Server looks up the user by email, issues a MikroChat JWT and refresh token
+
+### User Creation
+
+OAuth respects the `isInviteRequired` setting:
+
+- **`isInviteRequired: true`** (default): The user must already exist in MikroChat (invited by an admin). If the OAuth email doesn't match an existing user, sign-in is rejected with a 403 error.
+- **`isInviteRequired: false`**: If the OAuth email doesn't match an existing user, a new user is automatically created from the OAuth profile.
+
+### Supported Providers
+
+MikroChat includes built-in presets for common providers. You only need to supply your client credentials:
+
+| Provider  | Preset ID   | Scopes                           |
+|-----------|-------------|----------------------------------|
+| Google    | `google`    | `openid email profile`           |
+| Microsoft | `microsoft` | `openid email profile User.Read` |
+| GitHub    | `github`    | `user:email read:user`           |
+| GitLab    | `gitlab`    | `read_user email`                |
+
+### Custom Providers
+
+For self-hosted or less common OAuth providers, use the `custom` array:
+
+```json
+{
+  "oauth": {
+    "custom": [
+      {
+        "id": "keycloak",
+        "name": "Keycloak",
+        "authorizationUrl": "https://keycloak.example.com/realms/myrealm/protocol/openid-connect/auth",
+        "tokenUrl": "https://keycloak.example.com/realms/myrealm/protocol/openid-connect/token",
+        "userInfoUrl": "https://keycloak.example.com/realms/myrealm/protocol/openid-connect/userinfo",
+        "clientId": "your-client-id",
+        "clientSecret": "your-client-secret",
+        "redirectUri": "https://chat.example.com/auth/oauth/keycloak/callback",
+        "scopes": "openid email profile"
+      }
+    ]
+  }
+}
+```
+
+### Setting Up Provider Credentials
+
+**Google:**
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select an existing one
+3. Navigate to APIs & Services > Credentials
+4. Create an OAuth 2.0 Client ID (Web application)
+5. Add your redirect URI: `https://your-domain.com/auth/oauth/google/callback`
+6. Copy the Client ID and Client Secret into your config
+
+**Microsoft:**
+
+1. Go to the [Azure Portal](https://portal.azure.com/) > App registrations
+2. Register a new application
+3. Under Authentication, add a Web redirect URI: `https://your-domain.com/auth/oauth/microsoft/callback`
+4. Under Certificates & secrets, create a new client secret
+5. Copy the Application (client) ID and secret into your config
+
+**GitHub:**
+
+1. Go to GitHub Settings > Developer settings > OAuth Apps
+2. Register a new OAuth application
+3. Set the Authorization callback URL: `https://your-domain.com/auth/oauth/github/callback`
+4. Copy the Client ID and Client Secret into your config
+
+### OAuth Security
+
+- **CSRF protection**: Every OAuth flow generates a one-time state token tied to the user's IP address. The token is validated on callback and consumed immediately.
+- **Rate limiting**: OAuth endpoints are rate-limited per IP (default: 10 attempts per 15-minute window).
+- **Server-side token exchange**: Authorization codes are exchanged for tokens server-to-server, never exposed to the browser.
+
+## How Password Authentication Works
+
+### Invite Flow (isInviteRequired: true)
+
+**With email configured:**
+
+1. Admin adds a user through the settings panel (providing their email)
+2. Server creates the user and sends an invite email with a setup link
+3. User clicks the link and is taken to a "Set your password" screen
+4. User enters and confirms their password (minimum 8 characters)
+5. Server hashes the password, stores it, and creates a session
+6. User is signed in
+
+**Without email configured:**
+
+1. Admin adds a user through the settings panel (providing their email and an initial password)
+2. Server creates the user and sets the password immediately
+3. Admin shares the credentials with the user out-of-band
+4. User signs in with the provided email and password
+
+### Self-Registration (isInviteRequired: false)
+
+When invites are not required, users can create their own accounts:
+
+1. User navigates to the login page and clicks "Create Account"
+2. User enters their email and a password
+3. Server creates the user, hashes the password, and creates a session
+
+### Login
+
+1. User enters their email and password
+2. Server verifies the credentials and creates a session
+3. Server issues a JWT and refresh token
+
+### Password Reset
+
+**With email configured:**
+
+Users who have forgotten their password can reset it from the sign-in screen:
+
+1. User clicks "Forgot password?" on the sign-in screen
+2. User enters their email and submits
+3. If the email matches an account with a password, a reset link is sent via email
+4. User clicks the link and is taken to a "Reset your password" screen
+5. User enters and confirms their new password (minimum 8 characters)
+6. Server hashes the new password, stores it, and creates a session
+7. User is signed in
+
+:::note[Email enumeration protection]
+The reset endpoint always returns a success response regardless of whether the email matches an account. This prevents attackers from discovering which email addresses have accounts.
+:::
+
+**Without email configured:**
+
+The "Forgot password?" link is hidden. Instead, an admin can reset any user's password from the settings panel:
+
+1. Admin opens the settings panel and finds the user
+2. Admin clicks the reset password button and enters a new password
+3. Server updates the user's password hash
+4. Admin shares the new credentials with the user
+
+### Security
+
+- Passwords are hashed using `scrypt` with a 16-byte random salt and 64-byte derived key
+- Password verification uses timing-safe comparison to prevent timing attacks
+- Minimum password length: 8 characters
+- Password hashes are never returned in API responses
+
+## How Magic Links Work
+
+1. User enters their email address
+2. Server generates a signed JWT token with a short expiry
+3. Server sends an email with a link containing the token
+4. User clicks the link, which redirects to the app with the token
+5. App verifies the token and creates a session
+6. Server issues a longer-lived JWT and refresh token
+
+## Token Lifecycle
+
+MikroChat uses JWTs with refresh tokens for session management:
+
+| Token Type    | Default Expiry | Purpose             |
+|---------------|----------------|---------------------|
+| Magic link    | 15 minutes     | One-time login link |
+| JWT           | 15 minutes     | API authentication  |
+| Refresh token | 7 days         | Obtain new JWTs     |
+
+When the JWT expires, the frontend automatically uses the refresh token to get a new one. When the refresh token expires, the user must sign in again.
+
+## Session Limits
+
+By default, each user can have up to 3 active sessions. When a user signs in on a fourth device, the oldest session is invalidated.
+
+Configure this with `auth.maxActiveSessions`:
+
+```json
+{
+  "auth": {
+    "maxActiveSessions": 5
+  }
+}
+```
+
+## Invite-Only Registration
+
+Control whether users can self-register or must be invited by an admin:
+
+```json
+{
+  "auth": {
+    "isInviteRequired": true
+  }
+}
+```
+
+When `isInviteRequired` is `true`:
+
+- Only admins can add new users through the settings panel
+- Users who haven't been invited cannot sign in
+- The initial user (configured in `chat.initialUser`) is always allowed
+
+When `isInviteRequired` is `false`:
+
+- Anyone with a valid email can sign in
+- New users are created automatically on first sign-in
+
+## The Initial User
+
+Every MikroChat server has an initial admin user created when the server first starts. This is configured in `chat.initialUser`:
+
+```json
+{
+  "chat": {
+    "initialUser": {
+      "userName": "admin",
+      "email": "admin@example.com",
+      "password": "change-me-on-first-login"
+    }
+  }
+}
+```
+
+The `password` field is optional but **required for password auth mode without email**. It sets the admin's password on first server start only — if the user already has a password, it is not overwritten on subsequent starts. You can also set it via the `INITIAL_USER_PASSWORD` environment variable or the `--initialUserPassword` CLI flag.
+
+The initial user:
+
+- Is automatically created on first server start
+- Has admin privileges
+- Cannot be removed (as the last remaining admin)
+- Is the only user who can sign in when `isInviteRequired` is `true` and no other users exist
+
+## Email Configuration
+
+Email configuration is **required** for magic-link authentication. For password mode, it is **optional** -- without it, admins manage passwords directly through the settings panel (setting initial passwords when adding users and resetting passwords as needed). With email configured, users get invite links and can use self-service password reset. Dev mode and OAuth-only setups do not need email configuration.
+
+```json
+{
+  "email": {
+    "emailSubject": "Your MikroChat Login Link",
+    "user": "noreply@example.com",
+    "host": "smtp.example.com",
+    "password": "your-smtp-password",
+    "port": 465,
+    "secure": true,
+    "maxRetries": 2
+  }
+}
+```
+
+### Common SMTP Providers
+
+**Proton Mail (with SMTP token):**
+
+```json
+{
+  "email": {
+    "host": "smtp.protonmail.ch",
+    "port": 465,
+    "secure": true
+  }
+}
+```
+
+**Gmail (with App Password):**
+
+```json
+{
+  "email": {
+    "host": "smtp.gmail.com",
+    "port": 465,
+    "secure": true
+  }
+}
+```
+
+**SendGrid:**
+
+```json
+{
+  "email": {
+    "host": "smtp.sendgrid.net",
+    "port": 465,
+    "secure": true,
+    "user": "apikey"
+  }
+}
+```
+
+**Mailgun:**
+
+```json
+{
+  "email": {
+    "host": "smtp.mailgun.org",
+    "port": 465,
+    "secure": true
+  }
+}
+```
+
+## Custom Email Templates
+
+Customize the magic link email content:
+
+```javascript
+{
+  auth: {
+    templates: {
+      textVersion: (magicLink, expiryMinutes) =>
+        `Sign in to MikroChat by visiting: ${magicLink}\n\nThis link expires in ${expiryMinutes} minutes.`,
+      htmlVersion: (magicLink, expiryMinutes) =>
+        `<h1>Sign in to MikroChat</h1>
+         <p><a href="${magicLink}">Click here to sign in</a></p>
+         <p>This link expires in ${expiryMinutes} minutes.</p>`
+    }
+  }
+}
+```
+
+## Security Best Practices
+
+1. **Use a strong JWT secret**: Generate a random key with `openssl rand -base64 32`
+2. **Enable HTTPS**: Always use HTTPS in production to protect tokens in transit
+3. **Set appropriate expiry times**: Balance security (shorter) with convenience (longer)
+4. **Enable invite-only mode**: Prevent unauthorized access in private deployments
+5. **Use rate limiting**: Prevent brute-force attacks on the login endpoint

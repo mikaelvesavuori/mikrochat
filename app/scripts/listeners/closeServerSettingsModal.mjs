@@ -1,1 +1,0 @@
-closeServerSettingsModal.addEventListener('click', hideServerSettingsModal);

@@ -1,20 +1,8 @@
 import { state } from './state.mjs';
-import {
-  encryptionPasswordInput,
-  authPasswordInput,
-  authPasswordConfirmInput
-} from './dom.mjs';
-import {
-  AUTH_MODE,
-  DEFAULT_PASSWORD,
-  ENABLE_USER_SPECIFIC_ENCRYPTION
-} from './config.mjs';
+import { authPasswordInput, authPasswordConfirmInput } from './dom.mjs';
+import { getAuthMode } from './runtime-config.mjs';
 import { isValidEmail } from './utils.mjs';
-import {
-  initializeStorage,
-  checkForExistingData,
-  verifyEncryptionPassword
-} from './storage.mjs';
+import { checkForExistingData, storage } from './storage.mjs';
 import { isMagicLinkUrl, verifyMagicLink } from './magiclink.mjs';
 import { getUrlParams } from './url.mjs';
 // Note: apiRequest imported dynamically to avoid circular dependency at module load time
@@ -25,9 +13,10 @@ import { getUrlParams } from './url.mjs';
  */
 export async function saveTokens(tokens) {
   try {
-    await state.storage.setItem('accessToken', tokens.accessToken);
-    await state.storage.setItem('refreshToken', tokens.refreshToken);
-    await state.storage.setItem('exp', Date.now() + tokens.exp * 1000);
+    await storage.removeItem('token');
+    await storage.setItem('accessToken', tokens.accessToken);
+    await storage.setItem('refreshToken', tokens.refreshToken);
+    await storage.setItem('exp', Date.now() + tokens.exp * 1000);
 
     return true;
   } catch (error) {
@@ -43,7 +32,8 @@ export async function getTokens() {
   try {
     return {
       accessToken: await getAccessToken(),
-      refreshToken: await getRefreshToken()
+      refreshToken: await getRefreshToken(),
+      exp: Number(await storage.getItem('exp')) || 0
     };
   } catch (error) {
     console.error('Failed to get tokens:', error);
@@ -56,17 +46,14 @@ export async function getTokens() {
  * This will thus handle both regular and dev login cases.
  */
 export async function getAccessToken() {
-  return (
-    (await state.storage.getItem('token')) ||
-    (await state.storage.getItem('accessToken'))
-  );
+  return (await storage.getItem('token')) || (await storage.getItem('accessToken'));
 }
 
 /**
  * @description Get the refresh token from localStorage.
  */
 export async function getRefreshToken() {
-  return await state.storage.getItem('refreshToken');
+  return await storage.getItem('refreshToken');
 }
 
 /**
@@ -74,8 +61,10 @@ export async function getRefreshToken() {
  */
 export async function clearTokens() {
   try {
-    await state.storage.removeItem('accessToken');
-    await state.storage.removeItem('refreshToken');
+    await storage.removeItem('accessToken');
+    await storage.removeItem('refreshToken');
+    await storage.removeItem('exp');
+    await storage.removeItem('token');
 
     return true;
   } catch (error) {
@@ -179,8 +168,6 @@ export async function refreshTokens() {
       refreshToken
     });
 
-    if (!response.ok) throw new Error('Failed to refresh token');
-
     await saveTokens(response);
     return response;
   } catch (error) {
@@ -216,9 +203,7 @@ export async function signout() {
 export async function cleanup() {
   const { showToast } = await import('./ui.mjs');
 
-  localStorage.clear();
-  state.storage.clear();
-  state.storage = null;
+  storage.clear();
 
   state.currentUser = null;
 
@@ -237,13 +222,6 @@ export async function cleanup() {
 }
 
 /**
- * @description Checks if the encryption password screen should be shown.
- */
-export function isEncryptionPasswordRequired() {
-  return ENABLE_USER_SPECIFIC_ENCRYPTION;
-}
-
-/**
  * @description Checks if the user can be deemed authenticated through
  * the context, i.e. there is relevant prior localStorage data.
  */
@@ -254,14 +232,10 @@ export function isAuthenticated() {
 /**
  * @description Sign the user in to MikroChat.
  */
-export async function signin(email, encryptionPassword) {
-  const {
-    showToast,
-    showLoading,
-    hideLoading,
-    showAppScreen,
-    renderNewMagicLink
-  } = await import('./ui.mjs');
+export async function signin(email) {
+  const { showToast, showLoading, hideLoading, showAppScreen, renderNewMagicLink } = await import(
+    './ui.mjs'
+  );
 
   if (!email || !email.trim()) {
     showToast('Please enter your email', 'error');
@@ -273,56 +247,27 @@ export async function signin(email, encryptionPassword) {
     return;
   }
 
-  // Only require this if the input element is actually visible
-  if (
-    encryptionPasswordInput.style.display === 'block' &&
-    isEncryptionPasswordRequired() &&
-    (!encryptionPassword || !encryptionPassword.trim())
-  ) {
-    showToast('Please enter your encryption password', 'error');
-    return;
-  }
-
   try {
     showLoading();
 
-    const password = ENABLE_USER_SPECIFIC_ENCRYPTION
-      ? encryptionPassword
-      : DEFAULT_PASSWORD;
+    const authMode = getAuthMode();
 
-    const storageInitialized = await initializeStorage(password);
-    if (!storageInitialized) {
-      hideLoading();
-      showToast('Invalid encryption key', 'error');
-      return;
-    }
+    if (authMode === 'dev') return await handleDevModeSignIn(email);
 
-    if (!isEncryptionPasswordRequired())
-      encryptionPasswordInput.value = DEFAULT_PASSWORD;
-
-    if (AUTH_MODE === 'dev') return await handleDevModeSignIn(email);
-
-    if (AUTH_MODE === 'magic-link') {
+    if (authMode === 'magic-link') {
       if (isMagicLinkUrl()) return await handleMagicLinkSignIn();
 
       const authed = isAuthenticated();
 
       if (authed) {
-        const isValidPassword =
-          await verifyEncryptionPassword(encryptionPassword);
-
-        if (isValidPassword) {
-          showToast('Successfully logged in!');
-          return await showAppScreen();
-        }
-
-        showToast('Invalid password', 'error');
+        showToast('Successfully logged in!');
+        return await showAppScreen();
       } else {
         await renderNewMagicLink(email);
       }
     }
 
-    if (AUTH_MODE === 'password') {
+    if (authMode === 'password') {
       const password = authPasswordInput?.value;
       const confirmPassword = authPasswordConfirmInput?.value;
       const { emailParam, tokenParam, resetParam } = getUrlParams();
@@ -368,10 +313,7 @@ export async function signin(email, encryptionPassword) {
       }
 
       // Registration flow: confirm password field is visible
-      if (
-        authPasswordConfirmInput &&
-        authPasswordConfirmInput.offsetParent !== null
-      ) {
+      if (authPasswordConfirmInput && authPasswordConfirmInput.offsetParent !== null) {
         if (!password || password.length < 8) {
           showToast('Password must be at least 8 characters', 'error');
           hideLoading();
@@ -409,7 +351,7 @@ export async function handleDevModeSignIn(email) {
   const { showToast, showAppScreen } = await import('./ui.mjs');
 
   const response = await apiRequest('/auth/dev-login', 'POST', { email });
-  await state.storage.setItem('token', response.token);
+  await storage.setItem('token', response.token);
   state.currentUser = response.user;
 
   showToast('Successfully logged in!');

@@ -1,6 +1,5 @@
 import { API_BASE_URL } from './config.mjs';
 import { saveTokens } from './auth.mjs';
-import { initializeStorage } from './storage.mjs';
 import { setupNetworkListeners } from './events.mjs';
 
 /**
@@ -67,7 +66,7 @@ export function isOAuthCallback() {
 
 /**
  * @description Handle the OAuth callback by extracting tokens from the URL,
- * initializing storage, saving tokens, and preparing the app.
+ * saving tokens and preparing the app.
  */
 export async function handleOAuthCallback() {
   const params = new URLSearchParams(window.location.search);
@@ -83,8 +82,6 @@ export async function handleOAuthCallback() {
   const expiresIn = params.get('expires_in');
 
   if (!accessToken) throw new Error('No access token received');
-
-  await initializeStorage();
 
   await saveTokens({
     accessToken,

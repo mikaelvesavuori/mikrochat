@@ -1,55 +1,65 @@
-import { randomBytes } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  unlinkSync,
-  writeFileSync
-} from 'node:fs';
-import { join } from 'node:path';
-import type http from 'node:http';
 import { type Context, MikroServe } from 'mikroserve';
 
 import type { Message, ServerSettings, User } from './interfaces';
+import { deleteFiles, FileStorageError, serveFile, uploadFile } from './fileStorage';
+import { deleteImages, ImageStorageError, serveImage, uploadImage } from './imageStorage';
 import { MikroChat } from './MikroChat';
 
 import { OAuthProvider } from './oauth/OAuthService';
 import { OAuthSecurity } from './oauth/OAuthSecurity';
 import { resolveOAuthProviders } from './oauth/OAuthProviderResolver';
+import { registerAdminRoutes } from './server/adminRoutes';
+import { createAuthenticate } from './server/authMiddleware';
+import { registerEventRoutes } from './server/eventRoutes';
+import { createPublicRuntimeConfig } from './server/publicConfig';
 
 const DEFAULT_PAGE_LIMIT = 50;
-const MAX_IMAGE_SIZE_IN_MB = 10;
-const VALID_FILE_FORMATS = ['jpg', 'jpeg', 'png', 'webp', 'svg'];
-
-const MAX_CONNECTIONS_PER_USER = 3;
-const CONNECTION_TIMEOUT_MS = 60 * 1000;
-
-const activeConnections = new Map();
-const connectionTimeouts = new Map();
+const MAGIC_LINK_EMAIL_TIMEOUT_MS = 10_000;
+const MAGIC_LINK_RESPONSE = 'If this email can sign in, you will receive a link shortly.';
 
 /**
  * @description Runs a MikroServe instance to expose MikroChat as an API.
  */
 export async function startServer(settings: ServerSettings) {
-  const {
-    config,
-    auth,
-    chat,
-    isInviteRequired,
-    hasEmailConfig,
+  const { config, auth, chat, isInviteRequired, hasEmailConfig, authMode, appUrl } = settings;
+  const { oauth } = settings;
+  const publicRuntimeConfig = createPublicRuntimeConfig({
     authMode,
-    appUrl
-  } = settings;
+    hasEmailConfig,
+    isInviteRequired,
+    oauth
+  });
 
   const server = new MikroServe(config);
+  const authenticate = createAuthenticate({ auth, chat });
 
-  async function enrichMessagesWithAuthors(
-    messages: Message[]
-  ): Promise<Message[]> {
+  async function createMagicLinkWithTimeout(
+    request: Parameters<typeof auth.createMagicLink>[0]
+  ): Promise<Awaited<ReturnType<typeof auth.createMagicLink>>> {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      return await Promise.race([
+        auth.createMagicLink(request),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error('Magic link email timed out')),
+            MAGIC_LINK_EMAIL_TIMEOUT_MS
+          );
+        })
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+
+  server.get('/health', async (c: Context) => c.text('OK', 200));
+  server.get('/config.json', async (c: Context) => c.json(publicRuntimeConfig, 200));
+  server.get('/auth/config', async (c: Context) => c.json(publicRuntimeConfig, 200));
+
+  async function enrichMessagesWithAuthors(messages: Message[]): Promise<Message[]> {
     const uniqueAuthorIds = [
-      ...new Set(
-        messages.filter((m) => !m.author.isBot).map((m) => m.author.id)
-      )
+      ...new Set(messages.filter((m) => !m.author.isBot).map((m) => m.author.id))
     ];
     const authors = new Map<string, User>();
     await Promise.all(
@@ -69,6 +79,83 @@ export async function startServer(settings: ServerSettings) {
         }
       };
     });
+  }
+
+  function uploadImageResponse(c: Context) {
+    try {
+      const filename = uploadImage(c.body);
+      return c.json({ success: true, filename });
+    } catch (error) {
+      if (error instanceof ImageStorageError) return c.json({ error: error.message }, error.status);
+
+      console.error('Image upload error:', error);
+      return c.json(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : 'Upload failed'
+        },
+        500
+      );
+    }
+  }
+
+  function imageFetchResponse(c: Context) {
+    try {
+      const storedImage = serveImage(c.params.filename, c.query.size === 'thumb');
+      return c.binary(storedImage.buffer, storedImage.contentType);
+    } catch (error) {
+      if (error instanceof ImageStorageError) return c.json({ error: error.message }, error.status);
+
+      return c.json(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : 'Image fetch failed'
+        },
+        500
+      );
+    }
+  }
+
+  function uploadFileResponse(c: Context) {
+    try {
+      const attachment = uploadFile(c.body);
+      return c.json({ success: true, attachment }, 200);
+    } catch (error) {
+      if (error instanceof FileStorageError) return c.json({ error: error.message }, error.status);
+
+      console.error('File upload error:', error);
+      return c.json(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : 'Upload failed'
+        },
+        500
+      );
+    }
+  }
+
+  async function fileFetchResponse(c: Context, userId: string) {
+    try {
+      const attachment = await chat.getAttachmentForUser(c.params.filename, userId);
+      if (!attachment) return c.json({ error: 'File not found' }, 404);
+
+      const storedFile = serveFile(attachment);
+      c.res?.setHeader?.(
+        'Content-Disposition',
+        `attachment; filename="${storedFile.originalName}"`
+      );
+      return c.binary(storedFile.buffer, storedFile.contentType);
+    } catch (error) {
+      if (error instanceof FileStorageError) return c.json({ error: error.message }, error.status);
+
+      return c.json(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : 'File fetch failed'
+        },
+        500
+      );
+    }
   }
 
   /////////////////////////////////////
@@ -118,18 +205,12 @@ export async function startServer(settings: ServerSettings) {
       if (!c.body.email) return c.json({ error: 'Email is required' }, 400);
       const { email } = c.body;
 
-      let message =
-        'If a matching account was found, a magic link has been sent.';
-
       async function createLink() {
-        const result = await auth.createMagicLink({
-          email
-        });
-
-        if (!result)
-          return c.json({ error: 'Failed to create magic link' }, 400);
-
-        message = result.message;
+        try {
+          await createMagicLinkWithTimeout({ email });
+        } catch (error) {
+          console.error('Failed to request magic link:', error);
+        }
       }
 
       if (isInviteRequired) {
@@ -140,7 +221,7 @@ export async function startServer(settings: ServerSettings) {
       return c.json(
         {
           success: true,
-          message
+          message: MAGIC_LINK_RESPONSE
         },
         200
       );
@@ -178,8 +259,7 @@ export async function startServer(settings: ServerSettings) {
      */
     server.post('/auth/password-login', async (c: Context) => {
       const { email, password } = c.body;
-      if (!email || !password)
-        return c.json({ error: 'Email and password are required' }, 400);
+      if (!email || !password) return c.json({ error: 'Email and password are required' }, 400);
 
       try {
         const user = await chat.verifyUserPassword(email, password);
@@ -206,11 +286,10 @@ export async function startServer(settings: ServerSettings) {
       try {
         const user = await chat.getUserByEmail(email);
         if (user)
-          await auth.createMagicLink({
+          await createMagicLinkWithTimeout({
             email,
-            subject: user.passwordHash
-              ? 'Reset Your Password'
-              : 'Set Your Password'
+            appUrl: user.passwordHash ? `${appUrl.replace(/\/$/, '')}/reset` : appUrl,
+            subject: user.passwordHash ? 'Reset Your Password' : 'Set Your Password'
           });
       } catch {
         // Silently ignore errors to prevent email enumeration
@@ -219,8 +298,7 @@ export async function startServer(settings: ServerSettings) {
       return c.json(
         {
           success: true,
-          message:
-            'If a matching account was found, a password reset link has been sent.'
+          message: 'If this email can reset a password, you will receive a link shortly.'
         },
         200
       );
@@ -237,8 +315,7 @@ export async function startServer(settings: ServerSettings) {
       const authHeader = c.headers.authorization || '';
       const token = bodyToken || authHeader.split(' ')[1];
 
-      if (!email || !token)
-        return c.json({ error: 'Email and token are required' }, 400);
+      if (!email || !token) return c.json({ error: 'Email and token are required' }, 400);
       if (!password || password.length < 8)
         return c.json({ error: 'Password must be at least 8 characters' }, 400);
 
@@ -266,15 +343,11 @@ export async function startServer(settings: ServerSettings) {
         const { email, password } = c.body;
         if (!email) return c.json({ error: 'Email is required' }, 400);
         if (!password || password.length < 8)
-          return c.json(
-            { error: 'Password must be at least 8 characters' },
-            400
-          );
+          return c.json({ error: 'Password must be at least 8 characters' }, 400);
 
         try {
           const existingUser = await chat.getUserByEmail(email);
-          if (existingUser)
-            return c.json({ error: 'User already exists' }, 400);
+          if (existingUser) return c.json({ error: 'User already exists' }, 400);
 
           const user = await chat.addUser(email, email, false, true);
           await chat.setUserPassword(user.id, password);
@@ -286,8 +359,7 @@ export async function startServer(settings: ServerSettings) {
           });
           return c.json(tokens, 200);
         } catch (error) {
-          const message =
-            error instanceof Error ? error.message : 'An error occurred';
+          const message = error instanceof Error ? error.message : 'An error occurred';
           return c.json({ error: message }, 400);
         }
       });
@@ -297,8 +369,6 @@ export async function startServer(settings: ServerSettings) {
   //////////////////
   // OAuth Auth   //
   //////////////////
-
-  const { oauth } = settings;
 
   if (oauth) {
     const oauthSecurity = new OAuthSecurity(oauth);
@@ -315,8 +385,8 @@ export async function startServer(settings: ServerSettings) {
        * @description List available OAuth providers.
        */
       server.get('/auth/oauth/providers', async (c: Context) => {
-        const providerList = Array.from(oauthProviders.values()).map(
-          (provider) => provider.getPublicInfo()
+        const providerList = Array.from(oauthProviders.values()).map((provider) =>
+          provider.getPublicInfo()
         );
         return c.json({ providers: providerList, count: providerList.length });
       });
@@ -341,8 +411,7 @@ export async function startServer(settings: ServerSettings) {
               const info = oauthSecurity.getRateLimitInfo(`oauth:${ip}`);
               return c.json(
                 {
-                  error:
-                    'Too many authentication attempts. Please try again later.',
+                  error: 'Too many authentication attempts. Please try again later.',
                   retryAfter: Math.ceil((info.reset - Date.now()) / 1000)
                 },
                 429
@@ -353,10 +422,7 @@ export async function startServer(settings: ServerSettings) {
             const authUrl = provider.getAuthorizationUrl(state);
             return c.redirect(authUrl, 302);
           } catch (error) {
-            const message =
-              error instanceof Error
-                ? error.message
-                : 'Error initiating OAuth flow';
+            const message = error instanceof Error ? error.message : 'Error initiating OAuth flow';
             return c.json({ error: message }, 500);
           }
         });
@@ -380,8 +446,7 @@ export async function startServer(settings: ServerSettings) {
               const info = oauthSecurity.getRateLimitInfo(`oauth:${ip}`);
               return c.json(
                 {
-                  error:
-                    'Too many authentication attempts. Please try again later.',
+                  error: 'Too many authentication attempts. Please try again later.',
                   retryAfter: Math.ceil((info.reset - Date.now()) / 1000)
                 },
                 429
@@ -391,12 +456,8 @@ export async function startServer(settings: ServerSettings) {
             // Check for OAuth error response
             const error = c.query.error;
             if (error) {
-              const description =
-                c.query.error_description || 'Authentication was denied';
-              return c.redirect(
-                `${appUrl}/?oauth_error=${encodeURIComponent(description)}`,
-                302
-              );
+              const description = c.query.error_description || 'Authentication was denied';
+              return c.redirect(`${appUrl}/?oauth_error=${encodeURIComponent(description)}`, 302);
             }
 
             // Validate CSRF state
@@ -408,11 +469,7 @@ export async function startServer(settings: ServerSettings) {
                 302
               );
 
-            const validation = oauthSecurity.validateState(
-              state as string,
-              ip,
-              providerId
-            );
+            const validation = oauthSecurity.validateState(state as string, ip, providerId);
             if (!validation.valid)
               return c.redirect(
                 `${appUrl}/?oauth_error=${encodeURIComponent(validation.error || 'Invalid OAuth callback')}`,
@@ -448,14 +505,8 @@ export async function startServer(settings: ServerSettings) {
             });
             return c.redirect(`${appUrl}/?${oauthParams.toString()}`, 302);
           } catch (error) {
-            const message =
-              error instanceof Error
-                ? error.message
-                : 'OAuth authentication failed';
-            return c.redirect(
-              `${appUrl}/?oauth_error=${encodeURIComponent(message)}`,
-              302
-            );
+            const message = error instanceof Error ? error.message : 'OAuth authentication failed';
+            return c.redirect(`${appUrl}/?oauth_error=${encodeURIComponent(message)}`, 302);
           }
         });
       }
@@ -505,8 +556,7 @@ export async function startServer(settings: ServerSettings) {
    */
   server.get('/auth/sessions', authenticate, async (c: Context) => {
     const authHeader = c.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer '))
-      return c.json(null, 401);
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return c.json(null, 401);
 
     const body = c.body;
     const token = authHeader.split(' ')[1];
@@ -523,8 +573,7 @@ export async function startServer(settings: ServerSettings) {
    */
   server.delete('/auth/sessions', authenticate, async (c: Context) => {
     const authHeader = c.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer '))
-      return c.json(null, 401);
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return c.json(null, 401);
 
     const body = c.body;
     const token = authHeader.split(' ')[1];
@@ -549,18 +598,15 @@ export async function startServer(settings: ServerSettings) {
 
     const { email, role, password } = c.body;
     if (!email) return c.json({ error: 'Email is required' }, 400);
+    if (!user.isAdmin) return c.json({ error: 'Only administrators can add users' }, 403);
 
     try {
       // Ensure only admins can create admin users
       if (role === 'admin' && !user.isAdmin)
-        return c.json(
-          { error: 'Only administrators can add admin users' },
-          403
-        );
+        return c.json({ error: 'Only administrators can add admin users' }, 403);
 
       const existingUser = await chat.getUserByEmail(email);
-      if (existingUser)
-        return c.json({ success: false, message: 'User already exists' });
+      if (existingUser) return c.json({ success: false, message: 'User already exists' });
 
       const newUser = await chat.addUser(email, user.id, role === 'admin');
 
@@ -568,7 +614,7 @@ export async function startServer(settings: ServerSettings) {
         await chat.setUserPassword(newUser.id, password);
       } else if (authMode === 'password' && hasEmailConfig) {
         try {
-          await auth.createMagicLink({ email });
+          await createMagicLinkWithTimeout({ email });
         } catch {
           // Email sending failed, but user was created
         }
@@ -576,8 +622,7 @@ export async function startServer(settings: ServerSettings) {
 
       return c.json({ success: true, userId: newUser.id }, 200);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
+      const message = error instanceof Error ? error.message : 'An error occurred';
       return c.json({ error: message }, 400);
     }
   });
@@ -593,8 +638,7 @@ export async function startServer(settings: ServerSettings) {
       const users = await chat.listUsers();
       return c.json({ users: users.map(MikroChat.sanitizeUser) }, 200);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
+      const message = error instanceof Error ? error.message : 'An error occurred';
       return c.json({ error: message }, 400);
     }
   });
@@ -608,15 +652,46 @@ export async function startServer(settings: ServerSettings) {
 
     const userId = c.params.id;
 
-    if (userId === user.id)
-      return c.json({ error: 'You cannot remove your own account' }, 400);
+    if (userId === user.id) return c.json({ error: 'You cannot remove your own account' }, 400);
 
     try {
       await chat.removeUser(userId, user.id);
       return c.json({ success: true }, 200);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  /**
+   * @description Admin-only: update a user's role.
+   */
+  server.put('/users/:id/role', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+    if (!user.isAdmin) return c.json({ error: 'Only administrators can update user roles' }, 403);
+
+    const userId = c.params.id;
+    const requestedRole = c.body?.role;
+    const requestedAdminStatus = c.body?.isAdmin;
+
+    const isAdmin =
+      typeof requestedAdminStatus === 'boolean'
+        ? requestedAdminStatus
+        : requestedRole === 'admin'
+          ? true
+          : requestedRole === 'user'
+            ? false
+            : null;
+
+    if (typeof isAdmin !== 'boolean')
+      return c.json({ error: 'Role must be "user" or "admin"' }, 400);
+
+    try {
+      const updatedUser = await chat.updateUserRole(userId, user.id, isAdmin);
+      return c.json({ user: MikroChat.sanitizeUser(updatedUser) }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
       return c.json({ error: message }, 400);
     }
   });
@@ -627,8 +702,7 @@ export async function startServer(settings: ServerSettings) {
   server.post('/users/:id/reset-password', authenticate, async (c: Context) => {
     const user = c.state.user;
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
-    if (!user.isAdmin)
-      return c.json({ error: 'Only administrators can reset passwords' }, 403);
+    if (!user.isAdmin) return c.json({ error: 'Only administrators can reset passwords' }, 403);
 
     const userId = c.params.id;
     const { password } = c.body;
@@ -640,8 +714,7 @@ export async function startServer(settings: ServerSettings) {
       await chat.setUserPassword(userId, password);
       return c.json({ success: true }, 200);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
+      const message = error instanceof Error ? error.message : 'An error occurred';
       return c.json({ error: message }, 400);
     }
   });
@@ -658,22 +731,15 @@ export async function startServer(settings: ServerSettings) {
       if (user.isAdmin) {
         const admins = (await chat.listUsers()).filter((u: User) => u.isAdmin);
         if (admins.length <= 1) {
-          return c.json(
-            { error: 'Cannot exit as the last administrator' },
-            400
-          );
+          return c.json({ error: 'Cannot exit as the last administrator' }, 400);
         }
       }
 
       await chat.exitUser(user.id);
 
-      return c.json(
-        { success: true, message: 'You have exited the server' },
-        200
-      );
+      return c.json({ success: true, message: 'You have exited the server' }, 200);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
+      const message = error instanceof Error ? error.message : 'An error occurred';
       return c.json({ error: message }, 400);
     }
   });
@@ -693,8 +759,37 @@ export async function startServer(settings: ServerSettings) {
       const updatedUser = await chat.updateUserName(user.id, userName);
       return c.json({ user: MikroChat.sanitizeUser(updatedUser) }, 200);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  /**
+   * @description Read current user presence states.
+   */
+  server.get('/presence', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+    return c.json({ presence: chat.getPresence() }, 200);
+  });
+
+  /**
+   * @description Update the current user's presence status.
+   */
+  server.put('/presence/me', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+    const status = c.body?.status;
+    if (!['online', 'away', 'offline'].includes(status))
+      return c.json({ error: 'Invalid presence status' }, 400);
+
+    try {
+      const presence = await chat.setUserPresence(user.id, status);
+      return c.json({ presence }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
       return c.json({ error: message }, 400);
     }
   });
@@ -710,7 +805,7 @@ export async function startServer(settings: ServerSettings) {
     const user = c.state.user;
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-    const channels = await chat.listChannels();
+    const channels = await chat.listChannelsForUser(user.id);
     return c.json({ channels }, 200);
   });
 
@@ -721,15 +816,18 @@ export async function startServer(settings: ServerSettings) {
     const user = c.state.user;
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-    const { name } = c.body;
+    const { name, topic, isPrivate, members } = c.body;
     if (!name) return c.json({ error: 'Channel name is required' }, 400);
 
     try {
-      const channel = await chat.createChannel(name, user.id);
+      const channel = await chat.createChannel(name, user.id, {
+        topic,
+        isPrivate,
+        members
+      });
       return c.json({ channel }, 200);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
+      const message = error instanceof Error ? error.message : 'An error occurred';
       return c.json({ error: message }, 400);
     }
   });
@@ -737,63 +835,61 @@ export async function startServer(settings: ServerSettings) {
   /**
    * @description Get all messages in a channel.
    */
-  server.get(
-    '/channels/:channelId/messages',
-    authenticate,
-    async (c: Context) => {
-      const user = c.state.user;
-      if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  server.get('/channels/:channelId/messages', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-      const channelId = c.params.channelId;
-      const limit = c.query.limit
-        ? parseInt(c.query.limit, 10)
-        : DEFAULT_PAGE_LIMIT;
-      const before = c.query.before || undefined;
+    const channelId = c.params.channelId;
+    const limit = c.query.limit ? parseInt(c.query.limit, 10) : DEFAULT_PAGE_LIMIT;
+    const before = c.query.before || undefined;
 
-      try {
-        const messages = await chat.getMessagesByChannel(channelId, {
+    try {
+      const messages = await chat.getMessagesByChannel(
+        channelId,
+        {
           limit,
           before
-        });
-        const enhancedMessages = await enrichMessagesWithAuthors(messages);
+        },
+        user.id
+      );
+      const enhancedMessages = await enrichMessagesWithAuthors(messages);
 
-        return c.json({ messages: enhancedMessages }, 200);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'An error occurred';
-        return c.json({ error: message }, 400);
-      }
+      return c.json({ messages: enhancedMessages }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
     }
-  );
+  });
 
   /**
    * @description Create a message in a specific channel.
    */
-  server.post(
-    '/channels/:channelId/messages',
-    authenticate,
-    async (c: Context) => {
-      const user = c.state.user;
-      if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  server.post('/channels/:channelId/messages', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-      const channelId = c.params.channelId;
-      const content = c.body?.content;
-      const images = c.body?.images;
+    const channelId = c.params.channelId;
+    const content = c.body?.content;
+    const images = c.body?.images;
+    const attachments = c.body?.attachments;
+    const quotedMessageId = c.body?.quotedMessageId;
 
-      if (!content && !images)
-        return c.json({ error: 'Message content is required' }, 400);
+    if (!content && !images && !attachments)
+      return c.json({ error: 'Message content is required' }, 400);
 
-      try {
-        const message = await chat.createMessage(content, user.id, channelId);
+    try {
+      const message = await chat.createMessage(content || '', user.id, channelId, {
+        images: images || [],
+        attachments: attachments || [],
+        quotedMessageId
+      });
 
-        return c.json({ message }, 200);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'An error occurred';
-        return c.json({ error: message }, 400);
-      }
+      return c.json({ message }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
     }
-  );
+  });
 
   /**
    * @description Update the information for a channel.
@@ -803,17 +899,26 @@ export async function startServer(settings: ServerSettings) {
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
     const channelId = c.params.channelId;
-    const { name } = c.body;
+    const { name, topic, isPrivate, members } = c.body;
 
-    if (!name) return c.json({ error: 'Channel name is required' }, 400);
+    if (
+      name === undefined &&
+      topic === undefined &&
+      isPrivate === undefined &&
+      members === undefined
+    )
+      return c.json({ error: 'No channel update data provided' }, 400);
 
     try {
-      const channel = await chat.updateChannel(channelId, name, user.id);
+      const channel = await chat.updateChannel(
+        channelId,
+        { name, topic, isPrivate, members },
+        user.id
+      );
 
       return c.json({ channel }, 200);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
+      const message = error instanceof Error ? error.message : 'An error occurred';
       return c.json({ error: message }, 400);
     }
   });
@@ -831,8 +936,7 @@ export async function startServer(settings: ServerSettings) {
       await chat.deleteChannel(channelId, user.id);
       return c.json({ success: true }, 200);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
+      const message = error instanceof Error ? error.message : 'An error occurred';
       return c.json({ error: message }, 400);
     }
   });
@@ -851,26 +955,136 @@ export async function startServer(settings: ServerSettings) {
     const messageId = c.params.messageId;
     const content = c.body?.content;
     const images = c.body?.images;
+    const attachments = c.body?.attachments;
+    const quotedMessageId = c.body?.quotedMessageId;
 
-    if (!content && !images)
+    if (!content && !images && !attachments && quotedMessageId === undefined)
       return c.json({ error: 'Message content is required' }, 400);
 
     try {
-      const { message, removedImages } = await chat.updateMessage(
+      const { message, removedImages, removedAttachments } = await chat.updateMessage(
         messageId,
         user.id,
         content,
-        images
+        {
+          images,
+          attachments,
+          quotedMessageId
+        }
       );
 
       deleteImages(removedImages);
+      deleteFiles(removedAttachments);
 
       return c.json({ message }, 200);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
+      const message = error instanceof Error ? error.message : 'An error occurred';
       return c.json({ error: message }, 400);
     }
+  });
+
+  /**
+   * @description Pin a message in its channel.
+   */
+  server.post('/messages/:messageId/pin', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+    const messageId = c.params.messageId;
+
+    try {
+      const message = await chat.pinMessage(messageId, user.id);
+      return c.json({ message }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  /**
+   * @description Remove a channel pin from a message.
+   */
+  server.delete('/messages/:messageId/pin', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+    const messageId = c.params.messageId;
+
+    try {
+      const message = await chat.unpinMessage(messageId, user.id);
+      return c.json({ message }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  /**
+   * @description List pinned messages in a channel.
+   */
+  server.get('/channels/:channelId/pins', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+    const channelId = c.params.channelId;
+
+    try {
+      const messages = await chat.listPinnedMessages(channelId, user.id);
+      const enhancedMessages = await enrichMessagesWithAuthors(messages);
+      return c.json({ messages: enhancedMessages }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  /**
+   * @description Search messages visible to the current user.
+   */
+  server.get('/search/messages', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+    const q = c.query.q || '';
+    const limit = c.query.limit ? parseInt(c.query.limit, 10) : 50;
+    const from = c.query.from ? Number.parseInt(c.query.from, 10) : undefined;
+    const to = c.query.to ? Number.parseInt(c.query.to, 10) : undefined;
+
+    try {
+      const messages = await chat.searchMessages(user.id, q, {
+        channelId: c.query.channelId,
+        conversationId: c.query.conversationId,
+        authorId: c.query.authorId,
+        from,
+        to,
+        limit
+      });
+      const enhancedMessages = await enrichMessagesWithAuthors(messages);
+      return c.json({ messages: enhancedMessages }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
+    }
+  });
+
+  /**
+   * @description Upload a generic file attachment.
+   */
+  server.post('/files', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+    return uploadFileResponse(c);
+  });
+
+  /**
+   * @description Download a generic file attachment.
+   */
+  server.get('/files/:filename', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+    return fileFetchResponse(c, user.id);
   });
 
   /**
@@ -886,15 +1100,16 @@ export async function startServer(settings: ServerSettings) {
     try {
       const message = await chat.getMessageById(messageId);
       const images = message?.images || [];
+      const attachments = message?.attachments || [];
 
       await chat.deleteMessage(messageId, user.id);
 
       deleteImages(images);
+      deleteFiles(attachments);
 
       return c.json({ success: true }, 200);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
+      const message = error instanceof Error ? error.message : 'An error occurred';
       return c.json({ error: message }, 400);
     }
   });
@@ -902,75 +1117,56 @@ export async function startServer(settings: ServerSettings) {
   /**
    * @description Add a reaction to a message.
    */
-  server.post(
-    '/messages/:messageId/reactions',
-    authenticate,
-    async (c: Context) => {
-      const user = c.state.user;
-      if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  server.post('/messages/:messageId/reactions', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-      const messageId = c.params.messageId;
-      const { reaction } = c.body;
+    const messageId = c.params.messageId;
+    const { reaction } = c.body;
 
-      if (!reaction) return c.json({ error: 'Reaction is required' }, 400);
+    if (!reaction) return c.json({ error: 'Reaction is required' }, 400);
 
-      try {
-        const message = await chat.addReaction(messageId, user.id, reaction);
+    try {
+      const message = await chat.addReaction(messageId, user.id, reaction);
 
-        if (!message) {
-          return c.json(
-            { error: `Message with ID ${messageId} not found` },
-            404
-          );
-        }
-
-        return c.json({ message }, 200);
-      } catch (error) {
-        console.error(`Error adding reaction to message ${messageId}:`, error);
-        const message =
-          error instanceof Error ? error.message : 'An error occurred';
-        return c.json({ error: message }, 400);
+      if (!message) {
+        return c.json({ error: `Message with ID ${messageId} not found` }, 404);
       }
+
+      return c.json({ message }, 200);
+    } catch (error) {
+      console.error(`Error adding reaction to message ${messageId}:`, error);
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
     }
-  );
+  });
 
   /**
    * @description Remove a reaction from a message.
    */
-  server.delete(
-    '/messages/:messageId/reactions',
-    authenticate,
-    async (c: Context) => {
-      const user = c.state.user;
-      if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  server.delete('/messages/:messageId/reactions', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-      const messageId = c.params.messageId;
-      const { reaction } = c.body;
+    const messageId = c.params.messageId;
+    const { reaction } = c.body;
 
-      if (!reaction) return c.json({ error: 'Reaction is required' }, 400);
+    if (!reaction) return c.json({ error: 'Reaction is required' }, 400);
 
-      try {
-        const message = await chat.removeReaction(messageId, user.id, reaction);
+    try {
+      const message = await chat.removeReaction(messageId, user.id, reaction);
 
-        if (!message) {
-          return c.json(
-            { error: `Message with ID ${messageId} not found` },
-            404
-          );
-        }
-
-        return c.json({ message }, 200);
-      } catch (error) {
-        console.error(
-          `Error removing reaction from message ${messageId}:`,
-          error
-        );
-        const errorMessage =
-          error instanceof Error ? error.message : 'An error occurred';
-        return c.json({ error: errorMessage }, 400);
+      if (!message) {
+        return c.json({ error: `Message with ID ${messageId} not found` }, 404);
       }
+
+      return c.json({ message }, 200);
+    } catch (error) {
+      console.error(`Error removing reaction from message ${messageId}:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: errorMessage }, 400);
     }
-  );
+  });
 
   /////////////
   // Threads //
@@ -979,188 +1175,152 @@ export async function startServer(settings: ServerSettings) {
   /**
    * @description Get all replies in a thread.
    */
-  server.get(
-    '/messages/:messageId/thread',
-    authenticate,
-    async (c: Context) => {
-      const user = c.state.user;
-      if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  server.get('/messages/:messageId/thread', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-      const messageId = c.params.messageId;
-      const limit = c.query.limit
-        ? parseInt(c.query.limit, 10)
-        : DEFAULT_PAGE_LIMIT;
-      const before = c.query.before || undefined;
+    const messageId = c.params.messageId;
+    const limit = c.query.limit ? parseInt(c.query.limit, 10) : DEFAULT_PAGE_LIMIT;
+    const before = c.query.before || undefined;
 
-      try {
-        const replies = await chat.getThreadReplies(messageId, {
+    try {
+      const replies = await chat.getThreadReplies(
+        messageId,
+        {
           limit,
           before
-        });
-        const enhancedReplies = await enrichMessagesWithAuthors(replies);
+        },
+        user.id
+      );
+      const enhancedReplies = await enrichMessagesWithAuthors(replies);
 
-        return c.json({ replies: enhancedReplies }, 200);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'An error occurred';
-        return c.json({ error: message }, 400);
-      }
+      return c.json({ replies: enhancedReplies }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
     }
-  );
+  });
 
   /**
    * @description Create a thread reply on a message.
    */
-  server.post(
-    '/messages/:messageId/thread',
-    authenticate,
-    async (c: Context) => {
-      const user = c.state.user;
-      if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  server.post('/messages/:messageId/thread', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-      const parentMessageId = c.params.messageId;
-      const content = c.body?.content;
-      const images = c.body?.images;
+    const parentMessageId = c.params.messageId;
+    const content = c.body?.content;
+    const images = c.body?.images;
+    const attachments = c.body?.attachments;
+    const quotedMessageId = c.body?.quotedMessageId;
 
-      if (!content && !images)
-        return c.json({ error: 'Message content is required' }, 400);
+    if (!content && !images && !attachments)
+      return c.json({ error: 'Message content is required' }, 400);
 
-      try {
-        const { reply, parentMessage } = await chat.createThreadReply(
-          content,
-          user.id,
-          parentMessageId,
-          images || []
-        );
+    try {
+      const { reply, parentMessage } = await chat.createThreadReply(
+        content || '',
+        user.id,
+        parentMessageId,
+        {
+          images: images || [],
+          attachments: attachments || [],
+          quotedMessageId
+        }
+      );
 
-        return c.json({ reply, threadMeta: parentMessage.threadMeta }, 200);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'An error occurred';
-        return c.json({ error: message }, 400);
-      }
+      return c.json({ reply, threadMeta: parentMessage.threadMeta }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
     }
-  );
+  });
 
   /**
    * @description Update a thread reply.
    */
-  server.put(
-    '/messages/:messageId/thread/:replyId',
-    authenticate,
-    async (c: Context) => {
-      const user = c.state.user;
-      if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  server.put('/messages/:messageId/thread/:replyId', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-      const replyId = c.params.replyId;
-      const content = c.body?.content;
-      const images = c.body?.images;
+    const replyId = c.params.replyId;
+    const content = c.body?.content;
+    const images = c.body?.images;
+    const attachments = c.body?.attachments;
+    const quotedMessageId = c.body?.quotedMessageId;
 
-      if (!content && !images)
-        return c.json({ error: 'Message content is required' }, 400);
+    if (!content && !images && !attachments && quotedMessageId === undefined)
+      return c.json({ error: 'Message content is required' }, 400);
 
-      try {
-        const { message, removedImages } = await chat.updateThreadReply(
-          replyId,
-          user.id,
-          content,
-          images
-        );
+    try {
+      const { message, removedImages, removedAttachments } = await chat.updateThreadReply(
+        replyId,
+        user.id,
+        content,
+        {
+          images,
+          attachments,
+          quotedMessageId
+        }
+      );
 
-        deleteImages(removedImages);
+      deleteImages(removedImages);
+      deleteFiles(removedAttachments);
 
-        return c.json({ message }, 200);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'An error occurred';
-        return c.json({ error: message }, 400);
-      }
+      return c.json({ message }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
     }
-  );
+  });
 
   /**
    * @description Delete a thread reply.
    */
-  server.delete(
-    '/messages/:messageId/thread/:replyId',
-    authenticate,
-    async (c: Context) => {
-      const user = c.state.user;
-      if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  server.delete('/messages/:messageId/thread/:replyId', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-      const replyId = c.params.replyId;
+    const replyId = c.params.replyId;
 
-      try {
-        const reply = await chat.getMessageById(replyId);
-        const images = reply?.images || [];
+    try {
+      const reply = await chat.getMessageById(replyId);
+      const images = reply?.images || [];
+      const attachments = reply?.attachments || [];
 
-        await chat.deleteThreadReply(replyId, user.id);
+      await chat.deleteThreadReply(replyId, user.id);
 
-        deleteImages(images);
+      deleteImages(images);
+      deleteFiles(attachments);
 
-        return c.json({ success: true }, 200);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'An error occurred';
-        return c.json({ error: message }, 400);
-      }
+      return c.json({ success: true }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
     }
-  );
+  });
 
   /**
    * @description Upload an image for a thread reply.
    */
-  server.post(
-    '/messages/:messageId/thread/image',
-    authenticate,
-    async (c: Context) => {
-      const user = c.state.user;
-      if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  server.post('/messages/:messageId/thread/image', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-      try {
-        const { filename, image, thumbnail } = c.body;
+    const parentMessage = await chat.getMessageById(c.params.messageId);
+    if (!parentMessage) return c.json({ error: 'Parent message not found' }, 404);
 
-        if (!image) return c.json({ error: 'No image provided' }, 400);
-
-        const fileExtension = filename.split('.').pop();
-        if (!fileExtension)
-          return c.json({ error: 'Missing file extension' }, 400);
-
-        if (!VALID_FILE_FORMATS.includes(fileExtension))
-          return c.json({ error: 'Unsupported file format' }, 400);
-
-        const imageBuffer = Buffer.from(image, 'base64');
-
-        const maxImageSize = MAX_IMAGE_SIZE_IN_MB * 1024 * 1024;
-        if (imageBuffer.length > maxImageSize)
-          return c.json({ error: 'Image too large' }, 400);
-
-        const uploadDirectory = `${process.cwd()}/uploads`;
-        if (!existsSync(uploadDirectory)) mkdirSync(uploadDirectory);
-
-        const savedFileName = `${Date.now()}-${randomBytes(16).toString('hex')}.${fileExtension}`;
-        const uploadPath = join(uploadDirectory, savedFileName);
-
-        writeFileSync(uploadPath, imageBuffer);
-
-        if (thumbnail) saveThumbnail(uploadDirectory, savedFileName, thumbnail);
-
-        return c.json({
-          success: true,
-          filename: savedFileName
-        });
-      } catch (error) {
-        console.error('Image upload error:', error);
-        return c.json(
-          {
-            success: false,
-            error: error instanceof Error ? error.message : 'Upload failed'
-          },
-          500
-        );
-      }
+    if (parentMessage.channelId.startsWith('dm:')) {
+      const conversation = await chat.getConversationById(parentMessage.channelId);
+      if (!conversation?.participants.includes(user.id))
+        return c.json({ error: 'You are not a participant in this conversation' }, 403);
+    } else {
+      const canAccess = await chat.canUserAccessChannel(parentMessage.channelId, user.id);
+      if (!canAccess) return c.json({ error: 'You do not have access to this channel' }, 403);
     }
-  );
+
+    return uploadImageResponse(c);
+  });
 
   ///////////////////
   // Conversations //
@@ -1179,9 +1339,7 @@ export async function startServer(settings: ServerSettings) {
       // Batch-fetch unique participant users
       const otherUserIds = [
         ...new Set(
-          conversations
-            .map((conv) => conv.participants.find((p) => p !== user.id))
-            .filter(Boolean)
+          conversations.map((conv) => conv.participants.find((p) => p !== user.id)).filter(Boolean)
         )
       ] as string[];
       const userMap = new Map<string, User>();
@@ -1197,16 +1355,13 @@ export async function startServer(settings: ServerSettings) {
         const otherUser = otherUserId ? userMap.get(otherUserId) : null;
         return {
           ...conv,
-          otherUser: otherUser
-            ? { id: otherUser.id, userName: otherUser.userName }
-            : null
+          otherUser: otherUser ? { id: otherUser.id, userName: otherUser.userName } : null
         };
       });
 
       return c.json({ conversations: enhancedConversations }, 200);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
+      const message = error instanceof Error ? error.message : 'An error occurred';
       return c.json({ error: message }, 400);
     }
   });
@@ -1219,14 +1374,10 @@ export async function startServer(settings: ServerSettings) {
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
     const { targetUserId } = c.body;
-    if (!targetUserId)
-      return c.json({ error: 'Target user ID is required' }, 400);
+    if (!targetUserId) return c.json({ error: 'Target user ID is required' }, 400);
 
     try {
-      const { conversation, isNew } = await chat.getOrCreateConversation(
-        user.id,
-        targetUserId
-      );
+      const { conversation, isNew } = await chat.getOrCreateConversation(user.id, targetUserId);
 
       // Get other user info
       const otherUser = await chat.getUserById(targetUserId);
@@ -1235,17 +1386,14 @@ export async function startServer(settings: ServerSettings) {
         {
           conversation: {
             ...conversation,
-            otherUser: otherUser
-              ? { id: otherUser.id, userName: otherUser.userName }
-              : null
+            otherUser: otherUser ? { id: otherUser.id, userName: otherUser.userName } : null
           },
           isNew
         },
         200
       );
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
+      const message = error instanceof Error ? error.message : 'An error occurred';
       return c.json({ error: message }, 400);
     }
   });
@@ -1253,78 +1401,63 @@ export async function startServer(settings: ServerSettings) {
   /**
    * @description Get all messages in a conversation.
    */
-  server.get(
-    '/conversations/:conversationId/messages',
-    authenticate,
-    async (c: Context) => {
-      const user = c.state.user;
-      if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  server.get('/conversations/:conversationId/messages', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-      const conversationId = c.params.conversationId;
+    const conversationId = c.params.conversationId;
 
-      try {
-        const conversation = await chat.getConversationById(conversationId);
-        if (!conversation)
-          return c.json({ error: 'Conversation not found' }, 404);
+    try {
+      const conversation = await chat.getConversationById(conversationId);
+      if (!conversation) return c.json({ error: 'Conversation not found' }, 404);
 
-        if (!conversation.participants.includes(user.id))
-          return c.json(
-            { error: 'You are not a participant in this conversation' },
-            403
-          );
+      if (!conversation.participants.includes(user.id))
+        return c.json({ error: 'You are not a participant in this conversation' }, 403);
 
-        const limit = c.query.limit
-          ? parseInt(c.query.limit, 10)
-          : DEFAULT_PAGE_LIMIT;
-        const before = c.query.before || undefined;
-        const messages = await chat.getMessagesByConversation(conversationId, {
-          limit,
-          before
-        });
-        const enhancedMessages = await enrichMessagesWithAuthors(messages);
+      const limit = c.query.limit ? parseInt(c.query.limit, 10) : DEFAULT_PAGE_LIMIT;
+      const before = c.query.before || undefined;
+      const messages = await chat.getMessagesByConversation(conversationId, {
+        limit,
+        before
+      });
+      const enhancedMessages = await enrichMessagesWithAuthors(messages);
 
-        return c.json({ messages: enhancedMessages }, 200);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'An error occurred';
-        return c.json({ error: message }, 400);
-      }
+      return c.json({ messages: enhancedMessages }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
     }
-  );
+  });
 
   /**
    * @description Send a direct message in a conversation.
    */
-  server.post(
-    '/conversations/:conversationId/messages',
-    authenticate,
-    async (c: Context) => {
-      const user = c.state.user;
-      if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  server.post('/conversations/:conversationId/messages', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-      const conversationId = c.params.conversationId;
-      const content = c.body?.content;
-      const images = c.body?.images;
+    const conversationId = c.params.conversationId;
+    const content = c.body?.content;
+    const images = c.body?.images;
+    const attachments = c.body?.attachments;
+    const quotedMessageId = c.body?.quotedMessageId;
 
-      if (!content && !images)
-        return c.json({ error: 'Message content is required' }, 400);
+    if (!content && !images && !attachments)
+      return c.json({ error: 'Message content is required' }, 400);
 
-      try {
-        const message = await chat.createDirectMessage(
-          content,
-          user.id,
-          conversationId,
-          images
-        );
+    try {
+      const message = await chat.createDirectMessage(content || '', user.id, conversationId, {
+        images: images || [],
+        attachments: attachments || [],
+        quotedMessageId
+      });
 
-        return c.json({ message }, 200);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'An error occurred';
-        return c.json({ error: message }, 400);
-      }
+      return c.json({ message }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred';
+      return c.json({ error: message }, 400);
     }
-  );
+  });
 
   /**
    * @description Update a direct message.
@@ -1339,24 +1472,30 @@ export async function startServer(settings: ServerSettings) {
       const messageId = c.params.messageId;
       const content = c.body?.content;
       const images = c.body?.images;
+      const attachments = c.body?.attachments;
+      const quotedMessageId = c.body?.quotedMessageId;
 
-      if (!content && !images)
+      if (!content && !images && !attachments && quotedMessageId === undefined)
         return c.json({ error: 'Message content is required' }, 400);
 
       try {
-        const { message, removedImages } = await chat.updateDirectMessage(
+        const { message, removedImages, removedAttachments } = await chat.updateDirectMessage(
           messageId,
           user.id,
           content,
-          images
+          {
+            images,
+            attachments,
+            quotedMessageId
+          }
         );
 
         deleteImages(removedImages);
+        deleteFiles(removedAttachments);
 
         return c.json({ message }, 200);
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'An error occurred';
+        const message = error instanceof Error ? error.message : 'An error occurred';
         return c.json({ error: message }, 400);
       }
     }
@@ -1377,15 +1516,16 @@ export async function startServer(settings: ServerSettings) {
       try {
         const message = await chat.getMessageById(messageId);
         const images = message?.images || [];
+        const attachments = message?.attachments || [];
 
         await chat.deleteDirectMessage(messageId, user.id);
 
         deleteImages(images);
+        deleteFiles(attachments);
 
         return c.json({ success: true }, 200);
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'An error occurred';
+        const message = error instanceof Error ? error.message : 'An error occurred';
         return c.json({ error: message }, 400);
       }
     }
@@ -1394,70 +1534,31 @@ export async function startServer(settings: ServerSettings) {
   /**
    * @description Upload an image for a direct message.
    */
-  server.post(
-    '/conversations/:conversationId/messages/image',
-    authenticate,
-    async (c: Context) => {
-      const user = c.state.user;
-      if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  server.post('/conversations/:conversationId/messages/image', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-      const conversationId = c.params.conversationId;
+    const conversationId = c.params.conversationId;
 
-      try {
-        // Verify user is participant in conversation
-        const conversation = await chat.getConversationById(conversationId);
-        if (!conversation)
-          return c.json({ error: 'Conversation not found' }, 404);
+    try {
+      // Verify user is participant in conversation
+      const conversation = await chat.getConversationById(conversationId);
+      if (!conversation) return c.json({ error: 'Conversation not found' }, 404);
 
-        if (!conversation.participants.includes(user.id))
-          return c.json(
-            { error: 'You are not a participant in this conversation' },
-            403
-          );
+      if (!conversation.participants.includes(user.id))
+        return c.json({ error: 'You are not a participant in this conversation' }, 403);
 
-        const { filename, image, thumbnail } = c.body;
-
-        if (!image) return c.json({ error: 'No image provided' }, 400);
-
-        const fileExtension = filename.split('.').pop();
-        if (!fileExtension)
-          return c.json({ error: 'Missing file extension' }, 400);
-
-        if (!VALID_FILE_FORMATS.includes(fileExtension))
-          return c.json({ error: 'Unsupported file format' }, 400);
-
-        const imageBuffer = Buffer.from(image, 'base64');
-
-        const maxImageSize = MAX_IMAGE_SIZE_IN_MB * 1024 * 1024;
-        if (imageBuffer.length > maxImageSize)
-          return c.json({ error: 'Image too large' }, 400);
-
-        const uploadDirectory = `${process.cwd()}/uploads`;
-        if (!existsSync(uploadDirectory)) mkdirSync(uploadDirectory);
-
-        const savedFileName = `${Date.now()}-${randomBytes(16).toString('hex')}.${fileExtension}`;
-        const uploadPath = join(uploadDirectory, savedFileName);
-
-        writeFileSync(uploadPath, imageBuffer);
-
-        if (thumbnail) saveThumbnail(uploadDirectory, savedFileName, thumbnail);
-
-        return c.json({
-          success: true,
-          filename: savedFileName
-        });
-      } catch (error) {
-        console.error('Image upload error:', error);
-        return c.json(
-          {
-            success: false,
-            error: error instanceof Error ? error.message : 'Upload failed'
-          },
-          500
-        );
-      }
+      return uploadImageResponse(c);
+    } catch (error) {
+      return c.json(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : 'Image upload failed'
+        },
+        500
+      );
     }
-  );
+  });
 
   /**
    * @description Get an image from a direct message.
@@ -1474,57 +1575,12 @@ export async function startServer(settings: ServerSettings) {
       try {
         // Verify user is participant in conversation
         const conversation = await chat.getConversationById(conversationId);
-        if (!conversation)
-          return c.json({ error: 'Conversation not found' }, 404);
+        if (!conversation) return c.json({ error: 'Conversation not found' }, 404);
 
         if (!conversation.participants.includes(user.id))
-          return c.json(
-            { error: 'You are not a participant in this conversation' },
-            403
-          );
+          return c.json({ error: 'You are not a participant in this conversation' }, 403);
 
-        const { filename } = c.params;
-
-        // Prevent path traversal attacks
-        if (
-          filename.includes('..') ||
-          filename.includes('/') ||
-          filename.includes('\\')
-        )
-          return c.json({ error: 'Invalid filename' }, 400);
-
-        const uploadDirectory = `${process.cwd()}/uploads`;
-
-        // Serve thumbnail if requested and available
-        const serveThumbnail = c.query.size === 'thumb';
-        const thumbPath = join(uploadDirectory, `thumb-${filename}`);
-        const filePath =
-          serveThumbnail && existsSync(thumbPath)
-            ? thumbPath
-            : join(uploadDirectory, filename);
-
-        // Double-check the resolved path is within uploads directory
-        if (!filePath.startsWith(uploadDirectory))
-          return c.json({ error: 'Invalid filename' }, 400);
-
-        if (!existsSync(filePath))
-          return c.json({ error: 'Image not found' }, 404);
-
-        const imageBuffer = readFileSync(filePath);
-
-        const fileExtension =
-          serveThumbnail && existsSync(thumbPath)
-            ? 'jpg'
-            : filename.split('.').pop()?.toLowerCase();
-        let contentType = 'application/octet-stream'; // Default
-
-        if (fileExtension === 'jpg' || fileExtension === 'jpeg')
-          contentType = 'image/jpeg';
-        else if (fileExtension === 'png') contentType = 'image/png';
-        else if (fileExtension === 'webp') contentType = 'image/webp';
-        else if (fileExtension === 'svg') contentType = 'image/svg+xml';
-
-        return c.binary(imageBuffer, contentType);
+        return imageFetchResponse(c);
       } catch (error) {
         return c.json(
           {
@@ -1544,537 +1600,32 @@ export async function startServer(settings: ServerSettings) {
   /**
    * @description Add an image to an existing message.
    */
-  server.post(
-    '/channels/:channelId/messages/image',
-    authenticate,
-    async (c: Context) => {
-      const user = c.state.user;
-      if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  server.post('/channels/:channelId/messages/image', authenticate, async (c: Context) => {
+    const user = c.state.user;
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-      try {
-        const { filename, image, thumbnail } = c.body;
+    const canAccess = await chat.canUserAccessChannel(c.params.channelId, user.id);
+    if (!canAccess) return c.json({ error: 'You do not have access to this channel' }, 403);
 
-        if (!image) return c.json({ error: 'No image provided' }, 400);
-
-        const fileExtension = filename.split('.').pop();
-        if (!fileExtension)
-          return c.json({ error: 'Missing file extension' }, 400);
-
-        if (!VALID_FILE_FORMATS.includes(fileExtension))
-          return c.json({ error: 'Unsupported file format' }, 400);
-
-        const imageBuffer = Buffer.from(image, 'base64');
-
-        const maxImageSize = MAX_IMAGE_SIZE_IN_MB * 1024 * 1024;
-        if (imageBuffer.length > maxImageSize)
-          return c.json({ error: 'Image too large' }, 400);
-
-        const uploadDirectory = `${process.cwd()}/uploads`;
-        if (!existsSync(uploadDirectory)) mkdirSync(uploadDirectory);
-
-        const savedFileName = `${Date.now()}-${randomBytes(16).toString('hex')}.${fileExtension}`;
-        const uploadPath = join(uploadDirectory, savedFileName);
-
-        writeFileSync(uploadPath, imageBuffer);
-
-        if (thumbnail) saveThumbnail(uploadDirectory, savedFileName, thumbnail);
-
-        return c.json({
-          success: true,
-          filename: savedFileName
-        });
-      } catch (error) {
-        console.error('Image upload error:', error);
-        return c.json(
-          {
-            success: false,
-            error: error instanceof Error ? error.message : 'Upload failed'
-          },
-          500
-        );
-      }
-    }
-  );
+    return uploadImageResponse(c);
+  });
 
   /**
    * @description Get an image by file name, as the stored file is named on the server.
    */
-  server.get(
-    '/channels/:channelId/messages/image/:filename',
-    authenticate,
-    async (c: Context) => {
-      const user = c.state.user;
-      if (!user) return c.json({ error: 'Unauthorized' }, 401);
-
-      try {
-        const { filename } = c.params;
-
-        // Prevent path traversal attacks
-        if (
-          filename.includes('..') ||
-          filename.includes('/') ||
-          filename.includes('\\')
-        )
-          return c.json({ error: 'Invalid filename' }, 400);
-
-        const uploadDirectory = `${process.cwd()}/uploads`;
-
-        // Serve thumbnail if requested and available
-        const serveThumbnail = c.query.size === 'thumb';
-        const thumbPath = join(uploadDirectory, `thumb-${filename}`);
-        const filePath =
-          serveThumbnail && existsSync(thumbPath)
-            ? thumbPath
-            : join(uploadDirectory, filename);
-
-        // Double-check the resolved path is within uploads directory
-        if (!filePath.startsWith(uploadDirectory))
-          return c.json({ error: 'Invalid filename' }, 400);
-
-        if (!existsSync(filePath))
-          return c.json({ error: 'Image not found' }, 404);
-
-        const imageBuffer = readFileSync(filePath);
-
-        const fileExtension =
-          serveThumbnail && existsSync(thumbPath)
-            ? 'jpg'
-            : filename.split('.').pop()?.toLowerCase();
-        let contentType = 'application/octet-stream'; // Default
-
-        if (fileExtension === 'jpg' || fileExtension === 'jpeg')
-          contentType = 'image/jpeg';
-        else if (fileExtension === 'png') contentType = 'image/png';
-        else if (fileExtension === 'webp') contentType = 'image/webp';
-        else if (fileExtension === 'svg') contentType = 'image/svg+xml';
-
-        return c.binary(imageBuffer, contentType);
-      } catch (error) {
-        return c.json(
-          {
-            success: false,
-            error: error instanceof Error ? error.message : 'Image fetch failed'
-          },
-          500
-        );
-      }
-    }
-  );
-
-  /////////////////////
-  // Server settings //
-  /////////////////////
-
-  /**
-   * @description Get server settings.
-   */
-  server.get('/server/settings', authenticate, async (c: Context) => {
+  server.get('/channels/:channelId/messages/image/:filename', authenticate, async (c: Context) => {
     const user = c.state.user;
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-    try {
-      const settings = await chat.getServerSettings();
-      return c.json(settings || { name: 'MikroChat' }, 200);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
-      return c.json({ error: message }, 400);
-    }
+    const canAccess = await chat.canUserAccessChannel(c.params.channelId, user.id);
+    if (!canAccess) return c.json({ error: 'You do not have access to this channel' }, 403);
+
+    return imageFetchResponse(c);
   });
 
-  /**
-   * @description Update server settings.
-   */
-  server.put('/server/settings', authenticate, async (c: Context) => {
-    const user = c.state.user;
-    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  registerAdminRoutes({ server, authenticate, chat });
 
-    const { name } = c.body;
-
-    if (!name) return c.json({ error: 'Server name is required' }, 400);
-
-    try {
-      await chat.updateServerSettings({ name });
-      return c.json({ name }, 200);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
-      return c.json({ error: message }, 400);
-    }
-  });
-
-  //////////////
-  // Webhooks //
-  //////////////
-
-  /**
-   * @description List all webhooks. Admin only.
-   */
-  server.get('/webhooks', authenticate, async (c: Context) => {
-    const user = c.state.user;
-    if (!user) return c.json({ error: 'Unauthorized' }, 401);
-
-    try {
-      const webhooks = await chat.listWebhooks(user.id);
-      const sanitized = webhooks.map(({ token, ...rest }) => rest);
-      return c.json({ webhooks: sanitized }, 200);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
-      return c.json({ error: message }, 400);
-    }
-  });
-
-  /**
-   * @description Create a new webhook. Admin only.
-   * The token is returned only in this response.
-   */
-  server.post('/webhooks', authenticate, async (c: Context) => {
-    const user = c.state.user;
-    if (!user) return c.json({ error: 'Unauthorized' }, 401);
-
-    const { name, channelId } = c.body;
-    if (!name) return c.json({ error: 'Webhook name is required' }, 400);
-    if (!channelId) return c.json({ error: 'Channel ID is required' }, 400);
-
-    try {
-      const webhook = await chat.createWebhook(name, channelId, user.id);
-      return c.json({ webhook }, 200);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
-      return c.json({ error: message }, 400);
-    }
-  });
-
-  /**
-   * @description Delete a webhook. Admin only.
-   */
-  server.delete('/webhooks/:webhookId', authenticate, async (c: Context) => {
-    const user = c.state.user;
-    if (!user) return c.json({ error: 'Unauthorized' }, 401);
-
-    const webhookId = c.params.webhookId;
-
-    try {
-      await chat.deleteWebhook(webhookId, user.id);
-      return c.json({ success: true }, 200);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
-      return c.json({ error: message }, 400);
-    }
-  });
-
-  /**
-   * @description Post a message via webhook.
-   * Uses webhook token authentication (not JWT).
-   */
-  server.post('/webhooks/:webhookId/messages', async (c: Context) => {
-    const webhookId = c.params.webhookId;
-    const content = c.body?.content;
-
-    if (!content) return c.json({ error: 'Message content is required' }, 400);
-
-    const authHeader = c.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer '))
-      return c.json({ error: 'Webhook token is required' }, 401);
-
-    const token = authHeader.split(' ')[1];
-    if (!token) return c.json({ error: 'Webhook token is required' }, 401);
-
-    try {
-      const webhook = await chat.getWebhookByToken(token);
-      if (!webhook) return c.json({ error: 'Invalid webhook token' }, 401);
-
-      if (webhook.id !== webhookId)
-        return c.json(
-          { error: 'Webhook token does not match webhook ID' },
-          403
-        );
-
-      const message = await chat.createWebhookMessage(content, webhook);
-      return c.json({ message }, 200);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'An error occurred';
-      return c.json({ error: message }, 400);
-    }
-  });
-
-  //////////////////////////////
-  // Server Sent Events (SSE) //
-  //////////////////////////////
-
-  /**
-   * @description Set up connection with Server Sent Events.
-   */
-  server.get('/events', async (c: Context) => {
-    // Parse token from query parameter if present (for EventSource which can't set headers)
-    let user = null;
-    const token = c.query.token;
-    if (token) {
-      try {
-        const payload = auth.verify(token);
-        user = await chat.getUserByEmail(payload.email || payload.sub);
-      } catch (error) {
-        console.error('SSE token validation error:', error);
-      }
-    }
-
-    // If no token in query, try the Authorization header
-    if (!user && c.headers.authorization?.startsWith('Bearer ')) {
-      const headerToken = c.headers.authorization.substring(7);
-      try {
-        const payload = auth.verify(headerToken);
-        user = await chat.getUserByEmail(payload.email || payload.sub);
-      } catch (error) {
-        console.error('SSE header validation error:', error);
-      }
-    }
-
-    if (!user) {
-      console.log('SSE unauthorized access attempt');
-      return {
-        statusCode: 401,
-        body: { error: 'Unauthorized' },
-        headers: { 'Content-Type': 'application/json' }
-      };
-    }
-
-    const connectionId = randomBytes(8).toString('hex');
-
-    if (activeConnections.has(user.id)) {
-      const now = Date.now();
-
-      const userConnections = activeConnections.get(user.id);
-      const staleConnectionIds: string[] = [];
-
-      userConnections.forEach((connectionId: string) => {
-        const lastActivity = connectionTimeouts.get(connectionId) || 0;
-        if (now - lastActivity > CONNECTION_TIMEOUT_MS) {
-          staleConnectionIds.push(connectionId);
-        }
-      });
-
-      // Remove stale connections
-      staleConnectionIds.forEach((connectionId) => {
-        userConnections.delete(connectionId);
-        connectionTimeouts.delete(connectionId);
-        console.log(
-          `Cleaned up stale connection ${connectionId} for user ${user.id}`
-        );
-      });
-
-      // If the user is requesting a new connection but already has active ones,
-      // prioritize this new connection by removing the oldest one if at limit
-      if (userConnections.size >= MAX_CONNECTIONS_PER_USER) {
-        let oldestConnectionId = null;
-        let oldestTime = Number.POSITIVE_INFINITY;
-
-        userConnections.forEach((connectionId: string) => {
-          const lastActivity = connectionTimeouts.get(connectionId) || 0;
-          if (lastActivity < oldestTime) {
-            oldestTime = lastActivity;
-            oldestConnectionId = connectionId;
-          }
-        });
-
-        if (oldestConnectionId) {
-          userConnections.delete(oldestConnectionId);
-          connectionTimeouts.delete(oldestConnectionId);
-          console.log(
-            `Removed oldest connection ${oldestConnectionId} for user ${user.id} to make room`
-          );
-        }
-      }
-    } else {
-      activeConnections.set(user.id, new Set());
-    }
-
-    const userConnections = activeConnections.get(user.id);
-    userConnections.add(connectionId);
-
-    // Set initial activity timestamp
-    connectionTimeouts.set(connectionId, Date.now());
-
-    console.log(
-      `SSE connection established for user ${user.id} (${connectionId}). Total connections: ${userConnections.size}`
-    );
-
-    // Set up the response headers
-    (c.res as http.ServerResponse).writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no'
-    });
-
-    const updateActivity = () => {
-      connectionTimeouts.set(connectionId, Date.now());
-    };
-
-    // Heartbeat to keep connection alive and track activity
-    const keepAlive = setInterval(() => {
-      if (!c.res.writable) {
-        clearInterval(keepAlive);
-        return;
-      }
-      updateActivity();
-      // @ts-expect-error
-      c.res.write(': ping\n\n');
-    }, 30000);
-
-    // @ts-expect-error
-    c.res.write(':\n\n');
-    // @ts-expect-error
-    c.res.write(
-      `data: ${JSON.stringify({
-        type: 'CONNECTED',
-        payload: {
-          message: 'SSE connection established',
-          timestamp: new Date().toISOString(),
-          userId: user.id,
-          connectionId: connectionId
-        }
-      })}\n\n`
-    );
-
-    updateActivity();
-
-    const unsubscribe = chat.subscribeToEvents((event) => {
-      if (!c.res.writable) {
-        unsubscribe();
-        return;
-      }
-
-      // Filter DM events: only send to participants
-      const dmTypes = [
-        'NEW_DM_MESSAGE',
-        'UPDATE_DM_MESSAGE',
-        'DELETE_DM_MESSAGE'
-      ];
-      if (dmTypes.includes(event.type)) {
-        const payload = event.payload as { participants?: [string, string] };
-        if (payload.participants && !payload.participants.includes(user.id))
-          return;
-      }
-
-      try {
-        updateActivity();
-        // @ts-expect-error
-        c.res.write(`data: ${JSON.stringify(event)}\n\n`);
-      } catch (error) {
-        console.error('Error sending SSE event:', error);
-        cleanupConnection();
-      }
-    });
-
-    const cleanupConnection = () => {
-      const userConnections = activeConnections.get(user.id);
-      if (userConnections) {
-        userConnections.delete(connectionId);
-        connectionTimeouts.delete(connectionId);
-        console.log(
-          `Connection ${connectionId} for user ${user.id} cleaned up. Remaining: ${userConnections.size}`
-        );
-        if (userConnections.size === 0) activeConnections.delete(user.id);
-      }
-      unsubscribe();
-      clearInterval(keepAlive);
-      if (c.res.writable) c.res.end();
-    };
-
-    // Handle connection close
-    c.req.on('close', cleanupConnection);
-    c.req.on('error', (error) => {
-      console.error(`SSE connection error for user ${user.id}:`, error);
-      cleanupConnection();
-    });
-    c.res.on('error', (error) => {
-      console.error(`SSE response error for user ${user.id}:`, error);
-      cleanupConnection();
-    });
-
-    return {
-      statusCode: 200,
-      _handled: true,
-      body: null
-    };
-  });
-
-  /**
-   * @description Authentication middleware.
-   */
-
-  // biome-ignore lint/complexity/noBannedTypes: OK
-  async function authenticate(c: Context, next: Function) {
-    const unauthorized = {
-      error: 'Unauthorized',
-      message: 'Authentication required'
-    };
-
-    const authHeader = c.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer '))
-      return c.status(401).json(unauthorized);
-
-    const token = authHeader.split(' ')[1];
-    if (!token) return c.status(401).json(unauthorized);
-
-    const payload = auth.verify(token);
-    const user = await chat.getUserByEmail(payload.email || payload.sub);
-    c.state.user = user;
-
-    return next();
-  }
+  registerEventRoutes({ server, auth, chat });
 
   server.start();
-}
-
-/**
- * @description Save a client-generated thumbnail alongside the full image.
- */
-function saveThumbnail(
-  uploadDirectory: string,
-  savedFileName: string,
-  thumbnailBase64: string
-) {
-  try {
-    const thumbBuffer = Buffer.from(thumbnailBase64, 'base64');
-    const thumbPath = join(uploadDirectory, `thumb-${savedFileName}`);
-    writeFileSync(thumbPath, thumbBuffer);
-  } catch (error) {
-    console.error('Failed to save thumbnail:', error);
-  }
-}
-
-/**
- * @description Handle the deletion of images in a uniform manner.
- */
-function deleteImages(images: string[]) {
-  const uploadDirectory = `${process.cwd()}/uploads`;
-
-  for (const image of images) {
-    // Skip invalid filenames
-    if (
-      !image ||
-      image.includes('..') ||
-      image.includes('/') ||
-      image.includes('\\')
-    )
-      continue;
-
-    const imagePath = join(uploadDirectory, image);
-    const thumbPath = join(uploadDirectory, `thumb-${image}`);
-
-    // Verify path is within uploads directory
-    if (!imagePath.startsWith(uploadDirectory)) continue;
-
-    try {
-      if (existsSync(imagePath)) unlinkSync(imagePath);
-      if (existsSync(thumbPath)) unlinkSync(thumbPath);
-    } catch (error) {
-      console.error(`Failed to delete image ${image}:`, error);
-    }
-  }
 }

@@ -1,15 +1,15 @@
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function () {
-    navigator.serviceWorker
-      .register('/service-worker.js')
-      .then(function (registration) {
-        console.log(
-          'ServiceWorker registration successful with scope: ',
-          registration.scope
-        );
-      })
-      .catch(function (error) {
-        console.log('ServiceWorker registration failed: ', error);
-      });
-  });
-}
+window.addEventListener('load', async function () {
+  if ('serviceWorker' in navigator) {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+  }
+
+  if ('caches' in window) {
+    const cacheNames = await caches.keys();
+    await Promise.all(
+      cacheNames
+        .filter((cacheName) => cacheName.startsWith('mikrochat-'))
+        .map((cacheName) => caches.delete(cacheName))
+    );
+  }
+});

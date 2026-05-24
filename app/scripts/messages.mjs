@@ -1,26 +1,22 @@
 import { state } from './state.mjs';
 import { messageInput, messagesArea, channelsList } from './dom.mjs';
 import { API_BASE_URL, MAX_CONTENT_LENGTH } from './config.mjs';
+import { getAccessToken } from './auth.mjs';
 import { apiRequest, fetchImageWithAuth } from './api.mjs';
 import {
   showToast,
   showLoading,
   hideLoading,
-  updatePendingUploadsUI,
   openEditModal,
   openReactionPicker,
-  renderReaction
+  renderReaction,
+  updateQuotedMessageUI
 } from './ui.mjs';
-import { getAccessToken } from './auth.mjs';
-import {
-  sanitizeInput,
-  formatDate,
-  formatTime,
-  getInitials,
-  parseMarkdown
-} from './utils.mjs';
-import { convertBlobToBase64 } from './images.mjs';
+import { sanitizeInput, formatDate, formatTime, getInitials, parseMarkdown } from './utils.mjs';
+import { clearPendingUploads, createImageUploadPayload } from './images.mjs';
+import { uploadPendingFiles, formatAttachmentSize } from './files.mjs';
 import { processReactions } from './reactions.mjs';
+import { icon } from './icons.mjs';
 
 /**
  * @description Sends a message to the API.
@@ -32,7 +28,12 @@ import { processReactions } from './reactions.mjs';
 export async function sendMessage(content) {
   const sanitizedContent = sanitizeInput(content);
 
-  if (!sanitizedContent.trim() && state.pendingUploads.length === 0) return;
+  if (
+    !sanitizedContent.trim() &&
+    state.pendingUploads.length === 0 &&
+    state.pendingFiles.length === 0
+  )
+    return;
 
   if (sanitizedContent.length > MAX_CONTENT_LENGTH) {
     showToast(
@@ -44,23 +45,20 @@ export async function sendMessage(content) {
 
   // Handle DM mode
   if (state.viewMode === 'dm' && state.currentConversationId) {
-    const { sendDMMessage, uploadDMImage } = await import('./dmMessages.mjs');
+    const { appendDMMessage, sendDMMessage, uploadDMImage } = await import('./dmMessages.mjs');
     try {
       // Handle image uploads for DM
       const uploadedImages = [];
       if (state.pendingUploads.length > 0) {
         for (const upload of state.pendingUploads) {
-          const filename = await uploadDMImage({
-            name: upload.fileName,
-            blob: upload.blob,
-            thumbnailBlob: upload.thumbnailBlob
-          });
+          const filename = await uploadDMImage(upload);
           if (filename) uploadedImages.push(filename);
-          URL.revokeObjectURL(upload.preview);
         }
       }
 
-      await sendDMMessage(sanitizedContent, uploadedImages);
+      const attachments = state.pendingFiles.length > 0 ? await uploadPendingFiles() : [];
+      const message = await sendDMMessage(sanitizedContent, uploadedImages, attachments);
+      if (message) appendDMMessage(message);
     } catch (error) {
       showToast(error.message || 'Failed to send message', 'error');
     }
@@ -74,14 +72,16 @@ export async function sendMessage(content) {
     const emptyState = messagesArea.querySelector('.empty-state');
     if (emptyState) emptyState.remove();
 
-    const data = { content: sanitizedContent };
+    const attachments = state.pendingFiles.length > 0 ? await uploadPendingFiles() : [];
+
+    const data = {
+      content: sanitizedContent,
+      attachments,
+      quotedMessageId: state.quotedMessage?.id
+    };
     if (state.pendingUploads.length > 0) data.images = []; // Handle case where there are images but no text message
 
-    const response = await apiRequest(
-      `/channels/${state.currentChannelId}/messages`,
-      'POST',
-      data
-    );
+    const response = await apiRequest(`/channels/${state.currentChannelId}/messages`, 'POST', data);
 
     if (!response.message?.id) throw new Error('Failed to create message');
 
@@ -95,11 +95,15 @@ export async function sendMessage(content) {
     });
 
     updateMessageIds(tempId, messageId);
+    await appendMessage(response.message);
 
     if (state.pendingUploads.length > 0) {
-      await attachImagesToMessage(messageId);
-      await renderImagesInMessage(messageId, state.pendingUploads);
+      const images = await attachImagesToMessage(messageId);
+      await renderImagesInMessage(messageId, images);
     }
+
+    state.quotedMessage = null;
+    updateQuotedMessageUI();
   } catch (error) {
     showToast(error.message || 'Failed to send message', 'error');
   }
@@ -113,30 +117,18 @@ export async function attachImagesToMessage(messageId) {
   try {
     showLoading();
 
-    const token = await getAccessToken();
-    const headers = { 'Content-Type': 'application/json' };
-
-    if (token) headers.Authorization = `Bearer ${token}`;
-
     const images = [];
     const processedHashes = new Set();
 
     for (const upload of state.pendingUploads) {
       if (processedHashes.has(upload.fileHash)) {
         console.log(`Skipping duplicate image with hash: ${upload.fileHash}`);
-        URL.revokeObjectURL(upload.preview);
         continue;
       }
 
       processedHashes.add(upload.fileHash);
 
-      const image = await convertBlobToBase64(upload.blob);
-      const thumbnail = upload.thumbnailBlob
-        ? await convertBlobToBase64(upload.thumbnailBlob)
-        : undefined;
-
-      const payload = { filename: upload.fileName, image };
-      if (thumbnail) payload.thumbnail = thumbnail;
+      const payload = await createImageUploadPayload(upload);
 
       const response = await apiRequest(
         `/channels/${state.currentChannelId}/messages/image`,
@@ -146,8 +138,6 @@ export async function attachImagesToMessage(messageId) {
 
       const { filename } = response;
       images.push(filename);
-
-      URL.revokeObjectURL(upload.preview);
     }
 
     if (images.length > 0) {
@@ -162,15 +152,16 @@ export async function attachImagesToMessage(messageId) {
       }
     }
 
-    state.pendingUploads = [];
-    updatePendingUploadsUI();
+    clearPendingUploads();
 
     hideLoading();
 
     if (images.length > 0) showToast('Images uploaded successfully');
+    return images;
   } catch (error) {
     hideLoading();
     showToast(error.message || 'Failed to upload images', 'error');
+    return [];
   }
 }
 
@@ -181,26 +172,28 @@ export async function appendMessage(message) {
   if (document.querySelector(`.message[data-id="${message.id}"]`)) return;
 
   if (!message.id.startsWith('temp-')) {
-    const existingMessages = document.querySelectorAll('.message');
+    const existingMessages = document.querySelectorAll('#messages-area > .message[data-id]');
 
     for (const existingMsg of existingMessages) {
+      const existingMessageId = existingMsg.dataset.id;
+      if (!existingMessageId) continue;
+
       const sameAuthor = existingMsg.dataset.authorId === message.author.id;
 
       const sameContent =
-        existingMsg.querySelector('.message-text')?.textContent ===
-        message.content;
+        existingMsg.querySelector('.message-text')?.textContent === message.content;
 
-      const isTemp = existingMsg.dataset.id.startsWith('temp-');
+      const isTemp = existingMessageId.startsWith('temp-');
 
       if (sameAuthor && sameContent && isTemp) {
         console.log(
-          `Found matching temp message, updating ID from ${existingMsg.dataset.id} to ${message.id}`
+          `Found matching temp message, updating ID from ${existingMessageId} to ${message.id}`
         );
-        updateMessageIds(existingMsg.dataset.id, message.id);
+        updateMessageIds(existingMessageId, message.id);
 
-        state.messageCache.delete(existingMsg.dataset.id);
+        state.messageCache.delete(existingMessageId);
         state.messageCache.set(message.id, message);
-        state.tempIdMap.set(existingMsg.dataset.id, message.id);
+        state.tempIdMap.set(existingMessageId, message.id);
 
         return;
       }
@@ -208,9 +201,8 @@ export async function appendMessage(message) {
   }
 
   state.messageCache.set(message.id, message);
-  const messageDate = formatDate(
-    new Date(message.timestamp || message.createdAt)
-  );
+  refreshQuotePreviewsForMessage(message.id);
+  const messageDate = formatDate(new Date(message.timestamp || message.createdAt));
 
   renderDateDividers(messageDate);
 
@@ -219,6 +211,7 @@ export async function appendMessage(message) {
   messageElement.dataset.id = message.id;
   messageElement.dataset.authorId = message.author.id;
   messageElement.dataset.date = messageDate;
+  messageElement.id = `message-${message.id}`;
 
   messageElement.innerHTML = createMessageContent(message);
 
@@ -230,28 +223,26 @@ export async function appendMessage(message) {
 
   if (message.images && message.images.length > 0)
     await renderImagesInMessage(message.id, message.images);
+
+  if (message.attachments && message.attachments.length > 0)
+    renderAttachmentsInMessage(message.id, message.attachments);
 }
 
 /**
  * @description Render any images attached to a message.
  */
 export async function renderImagesInMessage(messageId, images) {
-  const messageElement = document.querySelector(
-    `.message[data-id="${messageId}"]`
-  );
+  const messageElement = document.querySelector(`.message[data-id="${messageId}"]`);
 
   if (messageElement) {
-    let imagesContainer = messageElement.querySelector(
-      '.message-images-container'
-    );
+    let imagesContainer = messageElement.querySelector('.message-images-container');
 
     if (!imagesContainer) {
       const messageContent = messageElement.querySelector('.message-content');
       imagesContainer = document.createElement('div');
       imagesContainer.className = 'message-images-container';
 
-      const reactionsContainer =
-        messageElement.querySelector('.message-reactions');
+      const reactionsContainer = messageElement.querySelector('.message-reactions');
       messageContent.insertBefore(imagesContainer, reactionsContainer);
     }
 
@@ -268,14 +259,112 @@ export async function renderImagesInMessage(messageId, images) {
   }
 }
 
+export function renderAttachmentsInMessage(messageId, attachments) {
+  const messageElement = document.querySelector(`.message[data-id="${messageId}"]`);
+
+  if (!messageElement) return;
+
+  let filesContainer = messageElement.querySelector('.message-files-container');
+
+  if (!filesContainer) {
+    const messageContent = messageElement.querySelector('.message-content');
+    filesContainer = document.createElement('div');
+    filesContainer.className = 'message-files-container';
+
+    const reactionsContainer = messageElement.querySelector('.message-reactions');
+    messageContent.insertBefore(filesContainer, reactionsContainer);
+  }
+
+  filesContainer.innerHTML = '';
+
+  for (const attachment of attachments) {
+    const fileLink = document.createElement('a');
+    fileLink.className = 'message-file';
+    fileLink.href = '#';
+    fileLink.rel = 'noopener';
+    fileLink.innerHTML = `
+      <span class="message-file-icon">${icon('paper-clip', 'icon file-icon')}</span>
+      <span class="message-file-name">${attachment.originalName}</span>
+      <span class="message-file-size">${formatAttachmentSize(attachment.size)}</span>
+    `;
+    fileLink.addEventListener('click', (event) => {
+      event.preventDefault();
+      downloadAttachment(attachment);
+    });
+    filesContainer.appendChild(fileLink);
+  }
+}
+
+async function downloadAttachment(attachment) {
+  try {
+    const token = await getAccessToken();
+    const response = await fetch(`${API_BASE_URL}/files/${attachment.filename}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    if (!response.ok) throw new Error('File download failed');
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = attachment.originalName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+  } catch (error) {
+    showToast(error.message || 'Failed to download file', 'error');
+  }
+}
+
+function getQuotedMessageFor(message) {
+  if (!message.quotedMessageId) return null;
+
+  return (
+    state.messageCache.get(message.quotedMessageId) ||
+    (state.quotedMessage?.id === message.quotedMessageId ? state.quotedMessage : null)
+  );
+}
+
+function getMessagePreview(message) {
+  const content = message.content?.replace(/\s+/g, ' ').trim();
+  if (content) return content;
+  if (message.attachments?.length) return message.attachments[0]?.originalName || 'Attachment';
+  if (message.images?.length) return message.images.length === 1 ? 'Image' : 'Images';
+  return 'Attachment';
+}
+
+function getQuoteText(quotedMessage) {
+  return `${quotedMessage.author?.userName || 'Someone'}: ${getMessagePreview(quotedMessage)}`;
+}
+
+export function createMessageQuoteHtml(message) {
+  if (!message.quotedMessageId) return '';
+
+  const quotedMessage = getQuotedMessageFor(message);
+  const quoteText = quotedMessage ? getQuoteText(quotedMessage) : 'Quoted message';
+
+  return `<div class="message-quote" data-quoted-message-id="${message.quotedMessageId}">${icon('arrow-uturn-left', 'icon quote-icon')}<span>${quoteText}</span></div>`;
+}
+
+export function refreshQuotePreviewsForMessage(messageId) {
+  const quotedMessage = state.messageCache.get(messageId);
+  if (!quotedMessage) return;
+
+  const quoteText = `${icon('arrow-uturn-left', 'icon quote-icon')}<span>${getQuoteText(quotedMessage)}</span>`;
+  const quoteElements = document.querySelectorAll('.message-quote[data-quoted-message-id]');
+
+  for (const element of quoteElements) {
+    if (element.dataset.quotedMessageId === messageId) element.innerHTML = quoteText;
+  }
+}
+
 /**
  * @description Creates the markup for the message.
  */
 export function createMessageContent(message) {
   let authorName = 'Unknown User';
   if (message.author?.userName) authorName = message.author.userName;
-  else if (message.author.id === state.currentUser.id)
-    authorName = state.currentUser.userName;
+  else if (message.author.id === state.currentUser.id) authorName = state.currentUser.userName;
 
   const avatarInitials = getInitials(authorName);
   const timestamp = message.timestamp || message.createdAt;
@@ -283,10 +372,13 @@ export function createMessageContent(message) {
 
   let textContent = '';
 
+  const quoteHtml = createMessageQuoteHtml(message);
+
   if (message.content) {
     let formattedContent = parseMarkdown(message.content);
     formattedContent = linkifyUrls(formattedContent);
     formattedContent = linkifyChannels(formattedContent);
+    formattedContent = linkifyMentions(formattedContent);
     textContent = `<div class="message-text">${formattedContent}</div>`;
   }
 
@@ -304,9 +396,12 @@ export function createMessageContent(message) {
       <span class="message-author">${authorName}</span>
       ${message.author?.isBot ? '<span class="bot-badge">BOT</span>' : ''}
       <span class="message-time">${time}</span>
+      ${message.pinnedAt ? '<span class="pinned-badge">Pinned</span>' : ''}
     </div>
+    ${quoteHtml}
     ${textContent}
     <div class="message-images-container"></div>
+    <div class="message-files-container"></div>
     <div class="message-reactions"></div>
     ${threadBadgeHtml}
     <div class="message-actions">
@@ -320,8 +415,11 @@ export function createMessageContent(message) {
             ? `<button class="message-delete" data-id="${message.id}">Delete</button>`
             : ''
       }
-      <div class="add-reaction" data-id="${message.id}">+ Add Reaction</div>
+      <div class="add-reaction" data-id="${message.id}">${icon('plus', 'icon add-reaction-icon')}<span>Add Reaction</span></div>
       <div class="start-thread" data-id="${message.id}">Reply</div>
+      <div class="quote-message" data-id="${message.id}">Quote</div>
+      <div class="copy-message-link" data-id="${message.id}">Copy Link</div>
+      <div class="pin-message" data-id="${message.id}">${message.pinnedAt ? 'Unpin' : 'Pin'}</div>
     </div>
   </div>
 `;
@@ -336,12 +434,7 @@ export async function renderReactionsForMessage(message) {
 
     for (const [reaction, userIds] of Object.entries(reactionItems)) {
       const hasUserReacted = userIds.includes(state.currentUser.id);
-      await renderReaction(
-        message.id,
-        reaction,
-        userIds.length,
-        hasUserReacted
-      );
+      await renderReaction(message.id, reaction, userIds.length, hasUserReacted);
     }
   }
 }
@@ -375,18 +468,14 @@ export function renderDateDividers(messageDate) {
  */
 export function addMessageEventListeners(message, messageElement) {
   const editButton = messageElement.querySelector('.message-edit');
-  if (editButton)
-    editButton.addEventListener('click', () => openEditModal(message));
+  if (editButton) editButton.addEventListener('click', () => openEditModal(message));
 
   const deleteButton = messageElement.querySelector('.message-delete');
-  if (deleteButton)
-    deleteButton.addEventListener('click', () => deleteMessage(message.id));
+  if (deleteButton) deleteButton.addEventListener('click', () => deleteMessage(message.id));
 
   const addReactionButton = messageElement.querySelector('.add-reaction');
   if (addReactionButton)
-    addReactionButton.addEventListener('click', () =>
-      openReactionPicker(message.id)
-    );
+    addReactionButton.addEventListener('click', () => openReactionPicker(message.id));
 
   const threadButton = messageElement.querySelector('.start-thread');
   if (threadButton)
@@ -395,12 +484,58 @@ export function addMessageEventListeners(message, messageElement) {
       openThread(message.id);
     });
 
+  const quoteButton = messageElement.querySelector('.quote-message');
+  if (quoteButton)
+    quoteButton.addEventListener('click', () => {
+      state.quotedMessage = message;
+      updateQuotedMessageUI();
+      messageInput?.focus();
+    });
+
+  const copyLinkButton = messageElement.querySelector('.copy-message-link');
+  if (copyLinkButton)
+    copyLinkButton.addEventListener('click', async () => {
+      const url = `${window.location.origin}${window.location.pathname}#message-${message.id}`;
+      await navigator.clipboard.writeText(url);
+      showToast('Message link copied');
+    });
+
+  const pinButton = messageElement.querySelector('.pin-message');
+  if (pinButton)
+    pinButton.addEventListener('click', () =>
+      toggleMessagePin(message.id, Boolean(message.pinnedAt))
+    );
+
   const threadBadge = messageElement.querySelector('.thread-badge');
   if (threadBadge)
     threadBadge.addEventListener('click', async () => {
       const { openThread } = await import('./threads.mjs');
       openThread(message.id);
     });
+}
+
+export async function toggleMessagePin(messageId, isPinned) {
+  try {
+    let message;
+    if (isPinned) {
+      await apiRequest(`/messages/${messageId}/pin`, 'DELETE');
+      const cachedMessage = state.messageCache.get(messageId);
+      if (cachedMessage) {
+        message = { ...cachedMessage };
+        delete message.pinnedAt;
+      }
+    } else {
+      const response = await apiRequest(`/messages/${messageId}/pin`, 'POST');
+      message = response.message || state.messageCache.get(messageId);
+    }
+    if (message) {
+      state.messageCache.set(messageId, message);
+      await updateMessageInUI(message);
+    }
+    showToast(isPinned ? 'Message unpinned' : 'Message pinned');
+  } catch (error) {
+    showToast(error.message || 'Failed to update pin', 'error');
+  }
 }
 
 const MESSAGE_PAGE_LIMIT = 50;
@@ -436,15 +571,11 @@ export async function loadMessagesForChannel(channelId, before) {
       messagesByDate[messageDate].push(message);
     }
 
-    const sortedDates = Object.keys(messagesByDate).sort(
-      (a, b) => new Date(b) - new Date(a)
-    );
+    const sortedDates = Object.keys(messagesByDate).sort((a, b) => new Date(b) - new Date(a));
 
     const dividers = document.querySelectorAll('.message-date-divider');
     for (const date of sortedDates) {
-      const dividerExists = Array.from(dividers).some(
-        (div) => div.textContent === date
-      );
+      const dividerExists = Array.from(dividers).some((div) => div.textContent === date);
 
       if (!dividerExists) {
         const dateDivider = document.createElement('div');
@@ -499,7 +630,7 @@ export function renderEmptyState() {
   const emptyState = document.createElement('div');
   emptyState.className = 'empty-state';
   emptyState.innerHTML = `
-    <div class="empty-state-icon">💬</div>
+    <div class="empty-state-icon">${icon('chat-bubble', 'icon empty-state-svg')}</div>
     <h3>No messages yet</h3>
     <p>Start the conversation!</p>
   `;
@@ -519,9 +650,7 @@ export function updateMessageIds(oldId, newId) {
       element.dataset.id = newId;
     }
 
-    const reactions = messageElement.querySelectorAll(
-      `[data-message-id="${oldId}"]`
-    );
+    const reactions = messageElement.querySelectorAll(`[data-message-id="${oldId}"]`);
     for (const element of reactions) element.dataset.messageId = newId;
   }
 }
@@ -585,22 +714,26 @@ export async function deleteMessage(messageId) {
  * @description Updates a message in the user interface.
  */
 export async function updateMessageInUI(message) {
-  const messageElement = document.querySelector(
-    `.message[data-id="${message.id}"]`
-  );
+  const messageElement = document.querySelector(`.message[data-id="${message.id}"]`);
 
   if (messageElement) {
-    const messageTextElement = messageElement.querySelector('.message-text');
-    if (messageTextElement) {
-      let formattedContent = parseMarkdown(message.content);
-      formattedContent = linkifyUrls(formattedContent);
-      formattedContent = linkifyChannels(formattedContent);
+    const cachedMessage = {
+      ...(state.messageCache.get(message.id) || {}),
+      ...message
+    };
+    state.messageCache.set(message.id, cachedMessage);
+    refreshQuotePreviewsForMessage(message.id);
 
-      messageTextElement.innerHTML = formattedContent;
-    }
+    messageElement.innerHTML = createMessageContent(cachedMessage);
+    addMessageEventListeners(cachedMessage, messageElement);
 
-    if (message.images && message.images.length > 0)
-      await renderImagesInMessage(message.id, message.images);
+    if (cachedMessage.images && cachedMessage.images.length > 0)
+      await renderImagesInMessage(message.id, cachedMessage.images);
+
+    if (cachedMessage.attachments)
+      renderAttachmentsInMessage(message.id, cachedMessage.attachments);
+
+    await renderReactionsForMessage(cachedMessage);
   }
 }
 
@@ -608,9 +741,7 @@ export async function updateMessageInUI(message) {
  * @description Removes a message by ID from the user interface.
  */
 export function removeMessageFromUI(messageId) {
-  const messageElement = document.querySelector(
-    `.message[data-id="${messageId}"]`
-  );
+  const messageElement = document.querySelector(`.message[data-id="${messageId}"]`);
   if (messageElement) {
     messageElement.remove();
 
@@ -619,10 +750,7 @@ export function removeMessageFromUI(messageId) {
       const nextElement = divider.nextElementSibling;
 
       // If there's no next element or it's another date divider, remove this divider
-      if (
-        !nextElement ||
-        nextElement.classList.contains('message-date-divider')
-      ) {
+      if (!nextElement || nextElement.classList.contains('message-date-divider')) {
         divider.remove();
       }
     }
@@ -650,6 +778,7 @@ export function formatMessageContent(content) {
   let formatted = parseMarkdown(content);
   formatted = linkifyUrls(formatted);
   formatted = linkifyChannels(formatted);
+  formatted = linkifyMentions(formatted);
   return formatted;
 }
 
@@ -667,18 +796,38 @@ export function linkifyChannels(text) {
   const channelPattern = /#([a-zA-Z0-9_-]+)/g;
 
   return text.replace(channelPattern, (match, channelName) => {
-    const channelEl = Array.from(
-      channelsList.querySelectorAll('.channel-item')
-    ).find(
+    const channelEl = Array.from(channelsList.querySelectorAll('.channel-item')).find(
       (item) =>
-        item.querySelector('.channel-name').textContent.toLowerCase() ===
-        channelName.toLowerCase()
+        item
+          .querySelector('.channel-name')
+          .textContent.trim()
+          .toLowerCase() === channelName.toLowerCase()
     );
 
     const channelId = channelEl?.dataset.id || '';
 
     if (channelId)
       return `<a href="#" class="channel-link" data-channel-id="${channelId}" data-channel-name="${channelName}">${match}</a>`;
+
+    return match;
+  });
+}
+
+/**
+ * @description Detect and format user mentions in a string.
+ */
+export function linkifyMentions(text) {
+  const mentionPattern = /@([a-zA-Z0-9_.-]+)/g;
+
+  return text.replace(mentionPattern, (match, userName) => {
+    const user = Array.from(state.userCache.values()).find(
+      (item) => item.userName?.toLowerCase() === userName.toLowerCase()
+    );
+
+    if (user) return `<span class="mention" data-user-id="${user.id}">${match}</span>`;
+
+    if (userName === 'channel' || userName === 'here')
+      return `<span class="mention mention-broadcast">${match}</span>`;
 
     return match;
   });
@@ -696,29 +845,12 @@ export function getActualMessageId(id) {
   return id;
 }
 
-/**
- * @description Handle creating a temporary message when offline.
- * Creates a local temporary message that will be visible in the UI.
- */
-export async function handleOfflineMessageCreation(_endpoint, data) {
-  const tempId = `temp-${Date.now()}`;
+function hasMessageBody(message, nextImages = message.images || []) {
+  const hasContent = Boolean(message.content?.trim());
+  const hasImages = nextImages.length > 0;
+  const hasAttachments = Boolean(message.attachments?.length);
 
-  const tempMessage = {
-    id: tempId,
-    content: data.content || '',
-    author: state.currentUser,
-    createdAt: new Date().toISOString(),
-    reactions: {},
-    images: [],
-    isOffline: true
-  };
-
-  state.messageCache.set(tempId, tempMessage);
-  await appendMessage(tempMessage);
-
-  showToast('Message saved locally. Will sync when online.', 'info');
-
-  return { message: tempMessage };
+  return hasContent || hasImages || hasAttachments;
 }
 
 /**
@@ -744,13 +876,20 @@ export async function removeImageFromMessage(messageId, filename) {
     }
 
     const updatedImages = message.images.filter((img) => img !== filename);
+
+    if (!hasMessageBody(message, updatedImages)) {
+      await apiRequest(`/messages/${actualId}`, 'DELETE');
+      state.messageCache.delete(messageId);
+      removeMessageFromUI(messageId);
+      showToast('Message deleted successfully');
+      return;
+    }
+
     await apiRequest(`/messages/${actualId}`, 'PUT', { images: updatedImages });
     message.images = updatedImages;
     state.messageCache.set(messageId, message);
 
-    const imageContainer = document.getElementById(
-      `img-container-${messageId}-${filename}`
-    );
+    const imageContainer = document.getElementById(`img-container-${messageId}-${filename}`);
     if (imageContainer) imageContainer.remove();
 
     showToast('Image removed successfully');

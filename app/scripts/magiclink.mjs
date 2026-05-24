@@ -1,6 +1,6 @@
-import { state } from './state.mjs';
 import { getUrlParams } from './url.mjs';
 import { verifyToken } from './auth.mjs';
+import { storage } from './storage.mjs';
 
 /**
  * @description Checks if the current URL looks to be a magic link URL,
@@ -26,8 +26,8 @@ export async function verifyMagicLink() {
 
     const { accessToken, refreshToken } = response;
 
-    await state.storage.setItem('accessToken', accessToken);
-    await state.storage.setItem('refreshToken', refreshToken);
+    await storage.setItem('accessToken', accessToken);
+    await storage.setItem('refreshToken', refreshToken);
 
     return true;
   } catch (error) {

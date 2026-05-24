@@ -3,14 +3,18 @@ import { EventEmitter } from 'node:events';
 import { MikroID } from 'mikroid';
 
 import type {
+  AuditLogEntry,
   Channel,
   ChatConfiguration,
   Conversation,
+  FileAttachment,
   Message,
   PaginationOptions,
   ServerSentEvent,
   ThreadMeta,
   User,
+  UserPresence,
+  UserPresenceStatus,
   Webhook
 } from './interfaces';
 
@@ -18,6 +22,47 @@ import { GeneralStorageProvider } from './providers/GeneralStorageProvider';
 import { InMemoryProvider } from './providers/InMemoryProvider';
 
 import { idConfig, idName } from './config/configDefaults';
+
+type ChannelCreateOptions = {
+  topic?: string;
+  isPrivate?: boolean;
+  members?: string[];
+};
+
+type ChannelUpdateOptions = ChannelCreateOptions & {
+  name?: string;
+};
+
+type MessageCreateOptions = {
+  images?: string[];
+  attachments?: FileAttachment[];
+  quotedMessageId?: string;
+};
+
+type MessageUpdateOptions = {
+  content?: string;
+  images?: string[];
+  attachments?: FileAttachment[];
+  quotedMessageId?: string;
+};
+
+type MessageSearchOptions = {
+  channelId?: string;
+  conversationId?: string;
+  authorId?: string;
+  from?: number;
+  to?: number;
+  limit?: number;
+};
+
+type AuditLogQuery = {
+  action?: string;
+  category?: string;
+  from?: number;
+  limit?: number;
+  offset?: number;
+  to?: number;
+};
 
 /**
  * @description MikroChat is a minimalistic, back-to-basics,
@@ -29,14 +74,25 @@ export class MikroChat {
   private readonly db: GeneralStorageProvider;
   private readonly id: MikroID;
   private readonly eventEmitter: EventEmitter;
+  private readonly presence: Map<string, UserPresence>;
 
   private readonly generalChannelName = 'General';
+  private static readonly auditActions = new Set([
+    'server.settings.update',
+    'user.create',
+    'user.remove',
+    'user.role.update',
+    'user.exit',
+    'webhook.create',
+    'webhook.delete'
+  ]);
 
   constructor(config: ChatConfiguration, db?: GeneralStorageProvider) {
     this.config = config;
     this.db = db || new InMemoryProvider();
     this.id = new MikroID();
     this.eventEmitter = new EventEmitter();
+    this.presence = new Map();
     this.eventEmitter.setMaxListeners(0); // Allow any number of event listeners
 
     this.initialize();
@@ -75,9 +131,9 @@ export class MikroChat {
         await this.setUserPassword(user.id, this.config.initialUser.password);
     }
 
-    const generalChannel = await this.db.getChannelByName(
-      this.generalChannelName
-    );
+    await this.pruneAuditLog();
+
+    const generalChannel = await this.db.getChannelByName(this.generalChannelName);
     if (!generalChannel) {
       await this.db.createChannel({
         id: this.id.custom(idName),
@@ -102,8 +158,7 @@ export class MikroChat {
       const channels = await this.db.listChannels();
 
       const millisecondsPerDay = 24 * 60 * 60 * 1000;
-      const cutoffTimestamp =
-        Date.now() - this.config.messageRetentionDays * millisecondsPerDay;
+      const cutoffTimestamp = Date.now() - this.config.messageRetentionDays * millisecondsPerDay;
 
       for (const channel of channels) {
         const index = await this.db.getIndex(`idx:channel-msgs:${channel.id}`);
@@ -113,9 +168,7 @@ export class MikroChat {
           const message = await this.db.getMessageById(msgId);
           if (!message) continue;
           if (message.createdAt < cutoffTimestamp) {
-            const threadReplies = await this.db.listMessagesByThread(
-              message.id
-            );
+            const threadReplies = await this.db.listMessagesByThread(message.id);
             for (const reply of threadReplies) {
               await this.db.deleteMessage(reply.id);
             }
@@ -128,12 +181,9 @@ export class MikroChat {
         }
 
         // Count-based retention: trim excess messages
-        const currentIndex = await this.db.getIndex(
-          `idx:channel-msgs:${channel.id}`
-        );
+        const currentIndex = await this.db.getIndex(`idx:channel-msgs:${channel.id}`);
         if (currentIndex.length > this.config.maxMessagesPerChannel) {
-          const excess =
-            currentIndex.length - this.config.maxMessagesPerChannel;
+          const excess = currentIndex.length - this.config.maxMessagesPerChannel;
           const toRemove = currentIndex.slice(0, excess);
           for (const msgId of toRemove) {
             await this.db.deleteMessage(msgId);
@@ -147,6 +197,108 @@ export class MikroChat {
     }, cleanupInterval);
   }
 
+  private normalizeChannelMembers(createdBy: string, members: string[] = []): string[] {
+    return [...new Set([createdBy, ...members].filter(Boolean))];
+  }
+
+  private async getUserOrThrow(userId: string): Promise<User> {
+    const user = await this.getUserById(userId);
+    if (!user) throw new Error('User not found');
+    return user;
+  }
+
+  private canAccessChannel(channel: Channel, user: User): boolean {
+    if (!channel.isPrivate) return true;
+    if (user.isAdmin) return true;
+    if (channel.createdBy === user.id) return true;
+    return Boolean(channel.members?.includes(user.id));
+  }
+
+  private async requireChannelAccess(
+    channelId: string,
+    userId: string
+  ): Promise<{ channel: Channel; user: User }> {
+    const user = await this.getUserOrThrow(userId);
+    const channel = await this.db.getChannelById(channelId);
+    if (!channel) throw new Error('Channel not found');
+    if (!this.canAccessChannel(channel, user))
+      throw new Error('You do not have access to this channel');
+    return { channel, user };
+  }
+
+  private async requireMessageAccess(message: Message, userId: string): Promise<void> {
+    if (message.channelId.startsWith('dm:')) {
+      const conversation = await this.getConversationById(message.channelId);
+      if (!conversation?.participants.includes(userId))
+        throw new Error('You do not have access to this conversation');
+      return;
+    }
+
+    await this.requireChannelAccess(message.channelId, userId);
+  }
+
+  private async resolveMentions(content: string): Promise<string[]> {
+    const mentionNames = [...content.matchAll(/(^|[\s([{])@([a-zA-Z0-9_.-]+)/g)].map((match) =>
+      match[2].toLowerCase()
+    );
+
+    if (mentionNames.length === 0) return [];
+
+    const users = await this.db.listUsers();
+    const mentionedIds = new Set<string>();
+
+    for (const name of mentionNames) {
+      if (name === 'channel' || name === 'here') {
+        mentionedIds.add(`@${name}`);
+        continue;
+      }
+
+      const user = users.find((u) => u.userName.toLowerCase() === name);
+      if (user) mentionedIds.add(user.id);
+    }
+
+    return [...mentionedIds];
+  }
+
+  private async recordAudit(
+    action: string,
+    actorId: string | undefined,
+    targetType: string,
+    targetId?: string,
+    metadata?: Record<string, unknown>
+  ): Promise<void> {
+    if (!MikroChat.auditActions.has(action)) return;
+
+    const entry: AuditLogEntry = {
+      id: this.id.custom(idName),
+      action,
+      actorId,
+      targetType,
+      targetId,
+      metadata,
+      createdAt: Date.now()
+    };
+
+    await this.db.createAuditLogEntry(entry);
+  }
+
+  private static filterAuditEntries(entries: AuditLogEntry[]): AuditLogEntry[] {
+    return entries.filter((entry) => MikroChat.auditActions.has(entry.action));
+  }
+
+  private static getAuditCategory(entry: AuditLogEntry): 'server' | 'user' {
+    return entry.targetType === 'user' ? 'user' : 'server';
+  }
+
+  private async pruneAuditLog(): Promise<void> {
+    const entries = await this.db.listAuditLog();
+    const staleEntries = entries.filter((entry) => !MikroChat.auditActions.has(entry.action));
+
+    for (const entry of staleEntries) {
+      await this.db.deleteAuditLogEntry(entry.id);
+    }
+  }
+
   ////////////////////////////
   // Database proxy methods //
   ////////////////////////////
@@ -155,8 +307,10 @@ export class MikroChat {
     return await this.db.getServerSettings();
   }
 
-  public async updateServerSettings(settings: { name: string }) {
+  public async updateServerSettings(settings: { name: string }, actorId?: string) {
     await this.db.updateServerSettings(settings);
+
+    await this.recordAudit('server.settings.update', actorId, 'server');
 
     this.emitEvent({
       type: 'UPDATE_SERVER_SETTINGS',
@@ -198,18 +352,15 @@ export class MikroChat {
    * The `force` option is used when creating users out-of-context
    * of the web application, such as directly on the server.
    */
-  public async addUser(
-    email: string,
-    addedBy = '',
-    isAdmin = false,
-    force = false
-  ): Promise<User> {
+  public async addUser(email: string, addedBy = '', isAdmin = false, force = false): Promise<User> {
     const adminUser = await this.getUserById(addedBy);
 
     if (!force && !adminUser) throw new Error('User not found');
 
-    if (isAdmin && !adminUser?.isAdmin)
+    if (!force && isAdmin && !adminUser?.isAdmin)
       throw new Error('Only administrators can add admin users');
+
+    if (!force && !adminUser?.isAdmin) throw new Error('Only administrators can add users');
 
     const existingUser = await this.getUserByEmail(email);
     if (existingUser) throw new Error('User with this email already exists');
@@ -226,10 +377,19 @@ export class MikroChat {
     };
 
     await this.createUser(user);
+    await this.recordAudit('user.create', addedBy || undefined, 'user', user.id, {
+      email: user.email,
+      isAdmin: user.isAdmin
+    });
 
     this.emitEvent({
       type: 'NEW_USER',
-      payload: { id: user.id, userName: user.userName, email: user.email }
+      payload: {
+        id: user.id,
+        userName: user.userName,
+        email: user.email,
+        isAdmin: user.isAdmin
+      }
     });
 
     return user;
@@ -245,21 +405,63 @@ export class MikroChat {
     const requester = await this.getUserById(requestedBy);
     if (!requester) throw new Error('Requester not found');
 
-    if (!requester.isAdmin)
-      throw new Error('Only administrators can remove users');
+    if (!requester.isAdmin) throw new Error('Only administrators can remove users');
 
     if (user.isAdmin) {
       const admins = (await this.listUsers()).filter((u: User) => u.isAdmin);
-      if (admins.length <= 1)
-        throw new Error('Cannot remove the last administrator');
+      if (admins.length <= 1) throw new Error('Cannot remove the last administrator');
     }
 
     await this.deleteUser(userId);
+    await this.recordAudit('user.remove', requestedBy, 'user', userId, {
+      email: user.email
+    });
 
     this.emitEvent({
       type: 'REMOVE_USER',
       payload: { id: userId, email: user.email }
     });
+  }
+
+  /**
+   * @description Update a user's admin status.
+   */
+  public async updateUserRole(
+    userId: string,
+    requestedBy: string,
+    isAdmin: boolean
+  ): Promise<User> {
+    const user = await this.getUserById(userId);
+    if (!user) throw new Error('User not found');
+
+    const requester = await this.getUserById(requestedBy);
+    if (!requester) throw new Error('Requester not found');
+
+    if (!requester.isAdmin) throw new Error('Only administrators can update user roles');
+
+    if (user.isAdmin && !isAdmin) {
+      const admins = (await this.listUsers()).filter((u: User) => u.isAdmin);
+      if (admins.length <= 1) throw new Error('Cannot remove the last administrator');
+    }
+
+    if (user.isAdmin === isAdmin) return user;
+
+    const updatedUser = { ...user, isAdmin };
+    await this.createUser(updatedUser);
+    await this.recordAudit('user.role.update', requestedBy, 'user', userId, {
+      isAdmin
+    });
+
+    this.emitEvent({
+      type: 'UPDATE_USER',
+      payload: {
+        id: userId,
+        userName: updatedUser.userName,
+        isAdmin: updatedUser.isAdmin
+      }
+    });
+
+    return updatedUser;
   }
 
   /**
@@ -270,6 +472,7 @@ export class MikroChat {
     if (!user) throw new Error('User not found');
 
     await this.deleteUser(userId);
+    await this.recordAudit('user.exit', userId, 'user', userId);
 
     this.emitEvent({
       type: 'USER_EXIT',
@@ -280,10 +483,7 @@ export class MikroChat {
   /**
    * @description Update a user's display name.
    */
-  public async updateUserName(
-    userId: string,
-    newUserName: string
-  ): Promise<User> {
+  public async updateUserName(userId: string, newUserName: string): Promise<User> {
     const trimmed = newUserName.trim();
     if (!trimmed) throw new Error('User name cannot be empty');
 
@@ -291,15 +491,14 @@ export class MikroChat {
     if (!user) throw new Error('User not found');
 
     const existing = await this.db.getUserByUsername(trimmed);
-    if (existing && existing.id !== userId)
-      throw new Error('User name is already taken');
+    if (existing && existing.id !== userId) throw new Error('User name is already taken');
 
     const updatedUser = { ...user, userName: trimmed };
     await this.createUser(updatedUser);
 
     this.emitEvent({
       type: 'UPDATE_USER',
-      payload: { id: userId, userName: trimmed }
+      payload: { id: userId, userName: trimmed, isAdmin: updatedUser.isAdmin }
     });
 
     return updatedUser;
@@ -322,10 +521,7 @@ export class MikroChat {
     return `${salt}:${hash.toString('hex')}`;
   }
 
-  private async verifyPasswordHash(
-    password: string,
-    stored: string
-  ): Promise<boolean> {
+  private async verifyPasswordHash(password: string, stored: string): Promise<boolean> {
     const [salt, hash] = stored.split(':');
     const hashBuffer = Buffer.from(hash, 'hex');
     const derivedKey = await new Promise<Buffer>((resolve, reject) => {
@@ -340,14 +536,9 @@ export class MikroChat {
   /**
    * @description Set or update a user's password.
    */
-  public async setUserPassword(
-    userId: string,
-    password: string
-  ): Promise<void> {
+  public async setUserPassword(userId: string, password: string): Promise<void> {
     if (password.length < MikroChat.MIN_PASSWORD_LENGTH)
-      throw new Error(
-        `Password must be at least ${MikroChat.MIN_PASSWORD_LENGTH} characters`
-      );
+      throw new Error(`Password must be at least ${MikroChat.MIN_PASSWORD_LENGTH} characters`);
 
     const user = await this.getUserById(userId);
     if (!user) throw new Error('User not found');
@@ -359,10 +550,7 @@ export class MikroChat {
   /**
    * @description Verify a user's password and return the user on success.
    */
-  public async verifyUserPassword(
-    email: string,
-    password: string
-  ): Promise<User> {
+  public async verifyUserPassword(email: string, password: string): Promise<User> {
     const user = await this.getUserByEmail(email);
     if (!user || !user.passwordHash) throw new Error('Invalid credentials');
 
@@ -389,15 +577,23 @@ export class MikroChat {
    */
   public async createChannel(
     name: string,
-    createdBy: string
+    createdBy: string,
+    options: ChannelCreateOptions = {}
   ): Promise<Channel> {
     const existingChannel = await this.db.getChannelByName(name);
-    if (existingChannel)
-      throw new Error(`Channel with name "${name}" already exists`);
+    if (existingChannel) throw new Error(`Channel with name "${name}" already exists`);
+
+    const creator = await this.getUserById(createdBy);
+    if (!creator) throw new Error('User not found');
 
     const channel: Channel = {
       id: this.id.custom(idName),
       name,
+      topic: options.topic,
+      isPrivate: options.isPrivate || false,
+      members: options.isPrivate
+        ? this.normalizeChannelMembers(createdBy, options.members)
+        : undefined,
       createdAt: Date.now(),
       createdBy
     };
@@ -417,7 +613,7 @@ export class MikroChat {
    */
   public async updateChannel(
     id: string,
-    name: string,
+    nameOrOptions: string | ChannelUpdateOptions,
     userId: string
   ): Promise<Channel> {
     const channel = await this.db.getChannelById(id);
@@ -429,17 +625,33 @@ export class MikroChat {
     if (channel.createdBy !== userId && !user.isAdmin)
       throw new Error('You can only edit channels you created');
 
-    if (channel.name === this.generalChannelName)
-      throw new Error(
-        `The ${this.generalChannelName} channel cannot be renamed`
-      );
+    const options = typeof nameOrOptions === 'string' ? { name: nameOrOptions } : nameOrOptions;
+
+    if (options.name && channel.name === this.generalChannelName)
+      throw new Error(`The ${this.generalChannelName} channel cannot be renamed`);
 
     // Check if another channel with the new name already exists
-    const channelWithSameName = await this.db.getChannelByName(name);
-    if (channelWithSameName && channelWithSameName.id !== id)
-      throw new Error(`Channel with name "${name}" already exists`);
+    if (options.name) {
+      const channelWithSameName = await this.db.getChannelByName(options.name);
+      if (channelWithSameName && channelWithSameName.id !== id)
+        throw new Error(`Channel with name "${options.name}" already exists`);
 
-    channel.name = name;
+      channel.name = options.name;
+    }
+
+    if (typeof options.topic === 'string') channel.topic = options.topic;
+
+    if (typeof options.isPrivate === 'boolean') channel.isPrivate = options.isPrivate;
+
+    if (channel.isPrivate) {
+      channel.members = this.normalizeChannelMembers(
+        channel.createdBy || userId,
+        options.members || channel.members || []
+      );
+    } else {
+      delete channel.members;
+    }
+
     channel.updatedAt = Date.now();
 
     await this.db.updateChannel(channel);
@@ -482,7 +694,7 @@ export class MikroChat {
 
     this.emitEvent({
       type: 'DELETE_CHANNEL',
-      payload: { id, name: channel.name }
+      payload: channel
     });
   }
 
@@ -491,6 +703,24 @@ export class MikroChat {
    */
   public async listChannels(): Promise<Channel[]> {
     return await this.db.listChannels();
+  }
+
+  /**
+   * @description List channels visible to a specific user.
+   */
+  public async listChannelsForUser(userId: string): Promise<Channel[]> {
+    const user = await this.getUserOrThrow(userId);
+    const channels = await this.db.listChannels();
+    return channels.filter((channel) => this.canAccessChannel(channel, user));
+  }
+
+  public async canUserAccessChannel(channelId: string, userId: string): Promise<boolean> {
+    try {
+      await this.requireChannelAccess(channelId, userId);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /////////////////////
@@ -504,15 +734,17 @@ export class MikroChat {
     content: string,
     authorId: string,
     channelId: string,
-    images: string[] = []
+    imagesOrOptions: string[] | MessageCreateOptions = []
   ): Promise<Message> {
     const user = await this.getUserById(authorId);
     if (!user) throw new Error('Author not found');
 
-    const channel = await this.db.getChannelById(channelId);
-    if (!channel) throw new Error('Channel not found');
+    await this.requireChannelAccess(channelId, authorId);
+
+    const options = Array.isArray(imagesOrOptions) ? { images: imagesOrOptions } : imagesOrOptions;
 
     const now = Date.now();
+    const messageContent = content || '';
 
     const message: Message = {
       id: this.id.custom(idName),
@@ -520,8 +752,11 @@ export class MikroChat {
         id: authorId,
         userName: user.userName
       },
-      images,
-      content,
+      images: options.images || [],
+      attachments: options.attachments || [],
+      quotedMessageId: options.quotedMessageId,
+      mentions: await this.resolveMentions(messageContent),
+      content: messageContent,
       channelId,
       createdAt: now,
       updatedAt: now,
@@ -545,22 +780,45 @@ export class MikroChat {
     id: string,
     userId: string,
     content?: string,
-    images?: string[]
-  ): Promise<{ message: Message; removedImages: string[] }> {
+    imagesOrOptions?: string[] | MessageUpdateOptions
+  ): Promise<{
+    message: Message;
+    removedImages: string[];
+    removedAttachments: FileAttachment[];
+  }> {
     const message = await this.getMessageById(id);
     if (!message) throw new Error('Message not found');
 
-    if (message.author.id !== userId)
-      throw new Error('You can only edit your own messages');
+    if (message.author.id !== userId) throw new Error('You can only edit your own messages');
+
+    if (!message.channelId.startsWith('dm:'))
+      await this.requireChannelAccess(message.channelId, userId);
+
+    const options = Array.isArray(imagesOrOptions)
+      ? { images: imagesOrOptions }
+      : imagesOrOptions || {};
 
     let removedImages: string[] = [];
+    let removedAttachments: FileAttachment[] = [];
 
-    if (content) message.content = content;
-    if (images) {
-      const currentImages = message.images || [];
-      removedImages = currentImages.filter((img) => !images.includes(img));
-      message.images = images;
+    if (content !== undefined) {
+      message.content = content;
+      message.mentions = await this.resolveMentions(content);
     }
+    if (options.images) {
+      const currentImages = message.images || [];
+      removedImages = currentImages.filter((img) => !options.images?.includes(img));
+      message.images = options.images;
+    }
+    if (options.attachments) {
+      const currentAttachments = message.attachments || [];
+      const nextFilenames = new Set(options.attachments.map((a) => a.filename));
+      removedAttachments = currentAttachments.filter(
+        (attachment) => !nextFilenames.has(attachment.filename)
+      );
+      message.attachments = options.attachments;
+    }
+    if (options.quotedMessageId !== undefined) message.quotedMessageId = options.quotedMessageId;
     message.updatedAt = Date.now();
 
     await this.db.updateMessage(message);
@@ -570,7 +828,7 @@ export class MikroChat {
       payload: message
     });
 
-    return { message, removedImages };
+    return { message, removedImages, removedAttachments };
   }
 
   /**
@@ -586,6 +844,9 @@ export class MikroChat {
     // Only allow deletion by the author or an admin
     if (message.author.id !== userId && !user.isAdmin)
       throw new Error('You can only delete your own messages');
+
+    if (!message.channelId.startsWith('dm:'))
+      await this.requireChannelAccess(message.channelId, userId);
 
     // Cascade-delete thread replies when parent is deleted
     if (message.threadMeta && message.threadMeta.replyCount > 0) {
@@ -608,9 +869,131 @@ export class MikroChat {
    */
   public async getMessagesByChannel(
     channelId: string,
-    options?: PaginationOptions
+    options?: PaginationOptions,
+    userId?: string
   ): Promise<Message[]> {
+    if (userId) await this.requireChannelAccess(channelId, userId);
     return await this.db.listMessagesByChannel(channelId, options);
+  }
+
+  /**
+   * @description Search visible channel and direct messages.
+   */
+  public async searchMessages(
+    userId: string,
+    query: string,
+    options: MessageSearchOptions = {}
+  ): Promise<Message[]> {
+    const user = await this.getUserOrThrow(userId);
+    const searchTerm = query.trim().toLowerCase();
+    if (!searchTerm) return [];
+
+    const messages = await this.db.listMessages();
+    const channels = await this.db.listChannels();
+    const channelMap = new Map(channels.map((channel) => [channel.id, channel]));
+    const conversations = await this.db.listConversationsForUser(userId);
+    const conversationIds = new Set(conversations.map((conv) => conv.id));
+
+    const visibleMessages = messages.filter((message) => {
+      if (options.channelId && message.channelId !== options.channelId) return false;
+      if (options.conversationId && message.channelId !== options.conversationId) return false;
+      if (options.authorId && message.author.id !== options.authorId) return false;
+      if (options.from && message.createdAt < options.from) return false;
+      if (options.to && message.createdAt > options.to) return false;
+
+      if (message.channelId.startsWith('dm:')) {
+        if (!conversationIds.has(message.channelId)) return false;
+      } else {
+        const channel = channelMap.get(message.channelId);
+        if (!channel || !this.canAccessChannel(channel, user)) return false;
+      }
+
+      const attachmentText = (message.attachments || [])
+        .map((attachment) => attachment.originalName)
+        .join(' ');
+      const haystack =
+        `${message.content} ${message.author.userName} ${attachmentText}`.toLowerCase();
+      return haystack.includes(searchTerm);
+    });
+
+    return visibleMessages.sort((a, b) => b.createdAt - a.createdAt).slice(0, options.limit || 50);
+  }
+
+  public async pinMessage(messageId: string, userId: string): Promise<Message> {
+    const message = await this.getMessageById(messageId);
+    if (!message) throw new Error('Message not found');
+    if (message.channelId.startsWith('dm:'))
+      throw new Error('Direct messages cannot be pinned yet');
+
+    const { channel } = await this.requireChannelAccess(message.channelId, userId);
+
+    const pinnedMessageIds = new Set(channel.pinnedMessageIds || []);
+    pinnedMessageIds.add(message.id);
+    channel.pinnedMessageIds = [...pinnedMessageIds];
+    channel.updatedAt = Date.now();
+
+    message.pinnedAt = Date.now();
+    message.updatedAt = message.pinnedAt;
+
+    await this.db.updateMessage(message);
+    await this.db.updateChannel(channel);
+
+    this.emitEvent({ type: 'UPDATE_MESSAGE', payload: message });
+    this.emitEvent({ type: 'UPDATE_CHANNEL', payload: channel });
+
+    return message;
+  }
+
+  public async unpinMessage(messageId: string, userId: string): Promise<Message> {
+    const message = await this.getMessageById(messageId);
+    if (!message) throw new Error('Message not found');
+    if (message.channelId.startsWith('dm:'))
+      throw new Error('Direct messages cannot be pinned yet');
+
+    const { channel } = await this.requireChannelAccess(message.channelId, userId);
+
+    channel.pinnedMessageIds = (channel.pinnedMessageIds || []).filter((id) => id !== message.id);
+    channel.updatedAt = Date.now();
+
+    delete message.pinnedAt;
+    message.updatedAt = Date.now();
+
+    await this.db.updateMessage(message);
+    await this.db.updateChannel(channel);
+
+    this.emitEvent({ type: 'UPDATE_MESSAGE', payload: message });
+    this.emitEvent({ type: 'UPDATE_CHANNEL', payload: channel });
+
+    return message;
+  }
+
+  public async listPinnedMessages(channelId: string, userId: string): Promise<Message[]> {
+    const { channel } = await this.requireChannelAccess(channelId, userId);
+    const messages: Message[] = [];
+
+    for (const messageId of channel.pinnedMessageIds || []) {
+      const message = await this.getMessageById(messageId);
+      if (message) messages.push(message);
+    }
+
+    return messages.sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0));
+  }
+
+  public async getAttachmentForUser(
+    filename: string,
+    userId: string
+  ): Promise<FileAttachment | null> {
+    const messages = await this.db.listMessages();
+
+    for (const message of messages) {
+      const attachment = message.attachments?.find((item) => item.filename === filename);
+      if (!attachment) continue;
+
+      await this.requireMessageAccess(message, userId);
+      return attachment;
+    }
+
+    return null;
   }
 
   //////////////////////
@@ -620,22 +1003,17 @@ export class MikroChat {
   /**
    * @description Add a reaction to a message.
    */
-  public async addReaction(
-    messageId: string,
-    userId: string,
-    reaction: string
-  ): Promise<Message> {
+  public async addReaction(messageId: string, userId: string, reaction: string): Promise<Message> {
     const user = await this.getUserById(userId);
     if (!user) throw new Error('User not found');
 
     const message = await this.getMessageById(messageId);
     if (!message) throw new Error('Message not found');
+    await this.requireMessageAccess(message, userId);
 
-    const updatedMessage = await this.db.addReaction(
-      messageId,
-      userId,
-      reaction
-    );
+    if (message.reactions?.[userId]?.includes(reaction)) return message;
+
+    const updatedMessage = await this.db.addReaction(messageId, userId, reaction);
 
     if (!updatedMessage) throw new Error('Failed to add reaction');
 
@@ -660,12 +1038,11 @@ export class MikroChat {
 
     const message = await this.getMessageById(messageId);
     if (!message) throw new Error('Message not found');
+    await this.requireMessageAccess(message, userId);
 
-    const updatedMessage = await this.db.removeReaction(
-      messageId,
-      userId,
-      reaction
-    );
+    if (!message.reactions?.[userId]?.includes(reaction)) return message;
+
+    const updatedMessage = await this.db.removeReaction(messageId, userId, reaction);
     if (!updatedMessage) throw new Error('Failed to remove reaction');
 
     this.emitEvent({
@@ -687,8 +1064,7 @@ export class MikroChat {
     userId1: string,
     userId2: string
   ): Promise<{ conversation: Conversation; isNew: boolean }> {
-    if (userId1 === userId2)
-      throw new Error('Cannot create a conversation with yourself');
+    if (userId1 === userId2) throw new Error('Cannot create a conversation with yourself');
 
     const user1 = await this.getUserById(userId1);
     if (!user1) throw new Error('User not found');
@@ -696,16 +1072,10 @@ export class MikroChat {
     const user2 = await this.getUserById(userId2);
     if (!user2) throw new Error('Target user not found');
 
-    const existing = await this.db.getConversationByParticipants(
-      userId1,
-      userId2
-    );
+    const existing = await this.db.getConversationByParticipants(userId1, userId2);
     if (existing) return { conversation: existing, isNew: false };
 
-    const conversationId = GeneralStorageProvider.generateConversationId(
-      userId1,
-      userId2
-    );
+    const conversationId = GeneralStorageProvider.generateConversationId(userId1, userId2);
 
     const conversation: Conversation = {
       id: conversationId,
@@ -733,9 +1103,7 @@ export class MikroChat {
   /**
    * @description List all conversations for a user.
    */
-  public async listConversationsForUser(
-    userId: string
-  ): Promise<Conversation[]> {
+  public async listConversationsForUser(userId: string): Promise<Conversation[]> {
     return await this.db.listConversationsForUser(userId);
   }
 
@@ -746,7 +1114,7 @@ export class MikroChat {
     content: string,
     authorId: string,
     conversationId: string,
-    images: string[] = []
+    imagesOrOptions: string[] | MessageCreateOptions = []
   ): Promise<Message> {
     const user = await this.getUserById(authorId);
     if (!user) throw new Error('Author not found');
@@ -757,7 +1125,9 @@ export class MikroChat {
     if (!conversation.participants.includes(authorId))
       throw new Error('You are not a participant in this conversation');
 
+    const options = Array.isArray(imagesOrOptions) ? { images: imagesOrOptions } : imagesOrOptions;
     const now = Date.now();
+    const messageContent = content || '';
 
     const message: Message = {
       id: this.id.custom(idName),
@@ -765,8 +1135,11 @@ export class MikroChat {
         id: authorId,
         userName: user.userName
       },
-      images,
-      content,
+      images: options.images || [],
+      attachments: options.attachments || [],
+      quotedMessageId: options.quotedMessageId,
+      mentions: await this.resolveMentions(messageContent),
+      content: messageContent,
       channelId: conversationId, // Reuse channelId for conversation ID
       createdAt: now,
       updatedAt: now,
@@ -805,26 +1178,45 @@ export class MikroChat {
     id: string,
     userId: string,
     content?: string,
-    images?: string[]
-  ): Promise<{ message: Message; removedImages: string[] }> {
+    imagesOrOptions?: string[] | MessageUpdateOptions
+  ): Promise<{
+    message: Message;
+    removedImages: string[];
+    removedAttachments: FileAttachment[];
+  }> {
     const message = await this.getMessageById(id);
     if (!message) throw new Error('Message not found');
 
     // Verify it's a DM (channelId starts with 'dm:')
-    if (!message.channelId.startsWith('dm:'))
-      throw new Error('Message is not a direct message');
+    if (!message.channelId.startsWith('dm:')) throw new Error('Message is not a direct message');
 
-    if (message.author.id !== userId)
-      throw new Error('You can only edit your own messages');
+    if (message.author.id !== userId) throw new Error('You can only edit your own messages');
+
+    const options = Array.isArray(imagesOrOptions)
+      ? { images: imagesOrOptions }
+      : imagesOrOptions || {};
 
     let removedImages: string[] = [];
+    let removedAttachments: FileAttachment[] = [];
 
-    if (content) message.content = content;
-    if (images) {
-      const currentImages = message.images || [];
-      removedImages = currentImages.filter((img) => !images.includes(img));
-      message.images = images;
+    if (content !== undefined) {
+      message.content = content;
+      message.mentions = await this.resolveMentions(content);
     }
+    if (options.images) {
+      const currentImages = message.images || [];
+      removedImages = currentImages.filter((img) => !options.images?.includes(img));
+      message.images = options.images;
+    }
+    if (options.attachments) {
+      const currentAttachments = message.attachments || [];
+      const nextFilenames = new Set(options.attachments.map((a) => a.filename));
+      removedAttachments = currentAttachments.filter(
+        (attachment) => !nextFilenames.has(attachment.filename)
+      );
+      message.attachments = options.attachments;
+    }
+    if (options.quotedMessageId !== undefined) message.quotedMessageId = options.quotedMessageId;
     message.updatedAt = Date.now();
 
     await this.db.updateMessage(message);
@@ -837,7 +1229,7 @@ export class MikroChat {
       payload: { ...message, participants }
     });
 
-    return { message, removedImages };
+    return { message, removedImages, removedAttachments };
   }
 
   /**
@@ -849,12 +1241,10 @@ export class MikroChat {
     if (!message) throw new Error('Message not found');
 
     // Verify it's a DM (channelId starts with 'dm:')
-    if (!message.channelId.startsWith('dm:'))
-      throw new Error('Message is not a direct message');
+    if (!message.channelId.startsWith('dm:')) throw new Error('Message is not a direct message');
 
     // Only the author can delete DM messages (privacy)
-    if (message.author.id !== userId)
-      throw new Error('You can only delete your own messages');
+    if (message.author.id !== userId) throw new Error('You can only delete your own messages');
 
     const conversation = await this.getConversationById(message.channelId);
     const participants = conversation?.participants || [userId, ''];
@@ -879,7 +1269,7 @@ export class MikroChat {
     content: string,
     authorId: string,
     parentMessageId: string,
-    images: string[] = []
+    imagesOrOptions: string[] | MessageCreateOptions = []
   ): Promise<{ reply: Message; parentMessage: Message }> {
     const user = await this.getUserById(authorId);
     if (!user) throw new Error('Author not found');
@@ -887,10 +1277,15 @@ export class MikroChat {
     const parentMessage = await this.getMessageById(parentMessageId);
     if (!parentMessage) throw new Error('Parent message not found');
 
-    if (parentMessage.threadId)
-      throw new Error('Cannot create a thread on a thread reply');
+    if (parentMessage.threadId) throw new Error('Cannot create a thread on a thread reply');
+
+    if (!parentMessage.channelId.startsWith('dm:'))
+      await this.requireChannelAccess(parentMessage.channelId, authorId);
+
+    const options = Array.isArray(imagesOrOptions) ? { images: imagesOrOptions } : imagesOrOptions;
 
     const now = Date.now();
+    const messageContent = content || '';
 
     const reply: Message = {
       id: this.id.custom(idName),
@@ -898,8 +1293,11 @@ export class MikroChat {
         id: authorId,
         userName: user.userName
       },
-      images,
-      content,
+      images: options.images || [],
+      attachments: options.attachments || [],
+      quotedMessageId: options.quotedMessageId,
+      mentions: await this.resolveMentions(messageContent),
+      content: messageContent,
       channelId: parentMessage.channelId,
       threadId: parentMessageId,
       createdAt: now,
@@ -943,8 +1341,15 @@ export class MikroChat {
    */
   public async getThreadReplies(
     parentMessageId: string,
-    options?: PaginationOptions
+    options?: PaginationOptions,
+    userId?: string
   ): Promise<Message[]> {
+    if (userId) {
+      const parentMessage = await this.getMessageById(parentMessageId);
+      if (!parentMessage) throw new Error('Parent message not found');
+      if (!parentMessage.channelId.startsWith('dm:'))
+        await this.requireChannelAccess(parentMessage.channelId, userId);
+    }
     return await this.db.listMessagesByThread(parentMessageId, options);
   }
 
@@ -955,24 +1360,47 @@ export class MikroChat {
     id: string,
     userId: string,
     content?: string,
-    images?: string[]
-  ): Promise<{ message: Message; removedImages: string[] }> {
+    imagesOrOptions?: string[] | MessageUpdateOptions
+  ): Promise<{
+    message: Message;
+    removedImages: string[];
+    removedAttachments: FileAttachment[];
+  }> {
     const message = await this.getMessageById(id);
     if (!message) throw new Error('Message not found');
 
     if (!message.threadId) throw new Error('Message is not a thread reply');
 
-    if (message.author.id !== userId)
-      throw new Error('You can only edit your own messages');
+    if (message.author.id !== userId) throw new Error('You can only edit your own messages');
+
+    if (!message.channelId.startsWith('dm:'))
+      await this.requireChannelAccess(message.channelId, userId);
+
+    const options = Array.isArray(imagesOrOptions)
+      ? { images: imagesOrOptions }
+      : imagesOrOptions || {};
 
     let removedImages: string[] = [];
+    let removedAttachments: FileAttachment[] = [];
 
-    if (content) message.content = content;
-    if (images) {
-      const currentImages = message.images || [];
-      removedImages = currentImages.filter((img) => !images.includes(img));
-      message.images = images;
+    if (content !== undefined) {
+      message.content = content;
+      message.mentions = await this.resolveMentions(content);
     }
+    if (options.images) {
+      const currentImages = message.images || [];
+      removedImages = currentImages.filter((img) => !options.images?.includes(img));
+      message.images = options.images;
+    }
+    if (options.attachments) {
+      const currentAttachments = message.attachments || [];
+      const nextFilenames = new Set(options.attachments.map((a) => a.filename));
+      removedAttachments = currentAttachments.filter(
+        (attachment) => !nextFilenames.has(attachment.filename)
+      );
+      message.attachments = options.attachments;
+    }
+    if (options.quotedMessageId !== undefined) message.quotedMessageId = options.quotedMessageId;
     message.updatedAt = Date.now();
 
     await this.db.updateMessage(message);
@@ -982,7 +1410,7 @@ export class MikroChat {
       payload: message
     });
 
-    return { message, removedImages };
+    return { message, removedImages, removedAttachments };
   }
 
   /**
@@ -1000,6 +1428,9 @@ export class MikroChat {
     if (message.author.id !== userId && !user.isAdmin)
       throw new Error('You can only delete your own messages');
 
+    if (!message.channelId.startsWith('dm:'))
+      await this.requireChannelAccess(message.channelId, userId);
+
     const parentMessageId = message.threadId;
     await this.db.deleteMessage(id);
 
@@ -1007,16 +1438,13 @@ export class MikroChat {
     let threadMeta: ThreadMeta | null = null;
 
     if (parentMessage) {
-      const remainingReplies =
-        await this.db.listMessagesByThread(parentMessageId);
+      const remainingReplies = await this.db.listMessagesByThread(parentMessageId);
 
       if (remainingReplies.length === 0) {
         delete parentMessage.threadMeta;
       } else {
         const lastReply = remainingReplies[remainingReplies.length - 1];
-        const participants = [
-          ...new Set(remainingReplies.map((r) => r.author.id))
-        ];
+        const participants = [...new Set(remainingReplies.map((r) => r.author.id))];
 
         parentMessage.threadMeta = {
           replyCount: remainingReplies.length,
@@ -1048,15 +1476,10 @@ export class MikroChat {
   /**
    * @description Create a new webhook for a channel. Admin only.
    */
-  public async createWebhook(
-    name: string,
-    channelId: string,
-    createdBy: string
-  ): Promise<Webhook> {
+  public async createWebhook(name: string, channelId: string, createdBy: string): Promise<Webhook> {
     const user = await this.getUserById(createdBy);
     if (!user) throw new Error('User not found');
-    if (!user.isAdmin)
-      throw new Error('Only administrators can create webhooks');
+    if (!user.isAdmin) throw new Error('Only administrators can create webhooks');
 
     const channel = await this.db.getChannelById(channelId);
     if (!channel) throw new Error('Channel not found');
@@ -1071,6 +1494,10 @@ export class MikroChat {
     };
 
     await this.db.createWebhook(webhook);
+    await this.recordAudit('webhook.create', createdBy, 'webhook', webhook.id, {
+      name: webhook.name,
+      channelId: webhook.channelId
+    });
 
     this.emitEvent({
       type: 'NEW_WEBHOOK',
@@ -1090,13 +1517,15 @@ export class MikroChat {
   public async deleteWebhook(webhookId: string, userId: string): Promise<void> {
     const user = await this.getUserById(userId);
     if (!user) throw new Error('User not found');
-    if (!user.isAdmin)
-      throw new Error('Only administrators can delete webhooks');
+    if (!user.isAdmin) throw new Error('Only administrators can delete webhooks');
 
     const webhook = await this.db.getWebhookById(webhookId);
     if (!webhook) throw new Error('Webhook not found');
 
     await this.db.deleteWebhook(webhookId);
+    await this.recordAudit('webhook.delete', userId, 'webhook', webhookId, {
+      channelId: webhook.channelId
+    });
 
     this.emitEvent({
       type: 'DELETE_WEBHOOK',
@@ -1132,10 +1561,7 @@ export class MikroChat {
   /**
    * @description Send a message as a webhook bot.
    */
-  public async createWebhookMessage(
-    content: string,
-    webhook: Webhook
-  ): Promise<Message> {
+  public async createWebhookMessage(content: string, webhook: Webhook): Promise<Message> {
     const channel = await this.db.getChannelById(webhook.channelId);
     if (!channel) throw new Error('Channel not found');
 
@@ -1149,6 +1575,7 @@ export class MikroChat {
         isBot: true
       },
       content,
+      mentions: await this.resolveMentions(content),
       channelId: webhook.channelId,
       createdAt: now,
       updatedAt: now,
@@ -1163,6 +1590,88 @@ export class MikroChat {
     });
 
     return message;
+  }
+
+  ////////////////////////
+  // Admin and presence //
+  ////////////////////////
+
+  public async listAuditLog(userId: string, limit = 100): Promise<AuditLogEntry[]> {
+    const user = await this.getUserOrThrow(userId);
+    if (!user.isAdmin) throw new Error('Only administrators can view the audit log');
+
+    return MikroChat.filterAuditEntries(await this.db.listAuditLog()).slice(0, limit);
+  }
+
+  public async queryAuditLog(userId: string, query: AuditLogQuery = {}) {
+    const user = await this.getUserOrThrow(userId);
+    if (!user.isAdmin) throw new Error('Only administrators can view the audit log');
+
+    const allEntries = MikroChat.filterAuditEntries(await this.db.listAuditLog());
+    const actions = [...new Set(allEntries.map((entry) => MikroChat.getAuditCategory(entry)))].sort();
+    const limit = Math.min(Math.max(query.limit ?? 25, 1), 100);
+    const offset = Math.max(query.offset ?? 0, 0);
+
+    let entries = allEntries;
+    if (query.action) entries = entries.filter((entry) => entry.action === query.action);
+    if (query.category === 'server')
+      entries = entries.filter((entry) => MikroChat.getAuditCategory(entry) === 'server');
+    if (query.category === 'user')
+      entries = entries.filter((entry) => MikroChat.getAuditCategory(entry) === 'user');
+    if (typeof query.from === 'number')
+      entries = entries.filter((entry) => entry.createdAt >= Number(query.from));
+    if (typeof query.to === 'number')
+      entries = entries.filter((entry) => entry.createdAt <= Number(query.to));
+
+    const total = entries.length;
+    const pagedEntries = entries.slice(offset, offset + limit);
+
+    return {
+      actions,
+      entries: pagedEntries,
+      hasMore: offset + limit < total,
+      limit,
+      offset,
+      total
+    };
+  }
+
+  public async exportData(userId: string) {
+    const user = await this.getUserOrThrow(userId);
+    if (!user.isAdmin) throw new Error('Only administrators can export data');
+
+    const webhooks = await this.db.listWebhooks();
+
+    return {
+      exportedAt: Date.now(),
+      users: (await this.db.listUsers()).map(MikroChat.sanitizeUser),
+      channels: await this.db.listChannels(),
+      messages: await this.db.listMessages(),
+      conversations: await this.db.listConversations(),
+      serverSettings: await this.db.getServerSettings(),
+      webhooks: webhooks.map(({ token: _, ...webhook }) => webhook),
+      auditLog: MikroChat.filterAuditEntries(await this.db.listAuditLog())
+    };
+  }
+
+  public async setUserPresence(userId: string, status: UserPresenceStatus): Promise<UserPresence> {
+    const user = await this.getUserById(userId);
+    if (!user) throw new Error('User not found');
+
+    const presence: UserPresence = {
+      userId,
+      status,
+      lastSeen: Date.now()
+    };
+
+    this.presence.set(userId, presence);
+    this.emitEvent({ type: 'PRESENCE_UPDATE', payload: presence });
+
+    return presence;
+  }
+
+  public getPresence(): UserPresence[] {
+    return [...this.presence.values()];
   }
 
   ////////////////////
@@ -1182,9 +1691,7 @@ export class MikroChat {
    * @description Subscribe to Server Sent Events.
    * @subscribes
    */
-  public subscribeToEvents(
-    callback: (event: ServerSentEvent) => void
-  ): () => void {
+  public subscribeToEvents(callback: (event: ServerSentEvent) => void): () => void {
     const listener = (event: ServerSentEvent) => callback(event);
 
     this.eventEmitter.on('sse', listener);

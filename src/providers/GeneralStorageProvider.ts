@@ -1,4 +1,5 @@
 import type {
+  AuditLogEntry,
   Channel,
   Conversation,
   DatabaseOperations,
@@ -79,6 +80,10 @@ export abstract class GeneralStorageProvider {
     return await this.db.get<Message>(`message:${id}`);
   }
 
+  public async listMessages(): Promise<Message[]> {
+    return await this.db.list<Message>('message:');
+  }
+
   public async listMessagesByChannel(
     channelId: string,
     options?: PaginationOptions
@@ -91,20 +96,11 @@ export abstract class GeneralStorageProvider {
     await this.db.set(`message:${message.id}`, message);
 
     if (message.threadId) {
-      await this.appendToIndex(
-        `idx:thread-msgs:${message.threadId}`,
-        message.id
-      );
+      await this.appendToIndex(`idx:thread-msgs:${message.threadId}`, message.id);
     } else if (message.channelId.startsWith('dm:')) {
-      await this.appendToIndex(
-        `idx:conv-msgs:${message.channelId}`,
-        message.id
-      );
+      await this.appendToIndex(`idx:conv-msgs:${message.channelId}`, message.id);
     } else {
-      await this.appendToIndex(
-        `idx:channel-msgs:${message.channelId}`,
-        message.id
-      );
+      await this.appendToIndex(`idx:channel-msgs:${message.channelId}`, message.id);
     }
   }
 
@@ -160,9 +156,7 @@ export abstract class GeneralStorageProvider {
     if (!message) return null;
     if (!message.reactions || !message.reactions[userId]) return message;
 
-    message.reactions[userId] = message.reactions[userId].filter(
-      (r) => r !== reaction
-    );
+    message.reactions[userId] = message.reactions[userId].filter((r) => r !== reaction);
 
     await this.updateMessage(message);
     return message;
@@ -184,10 +178,7 @@ export abstract class GeneralStorageProvider {
   // Conversation methods //
   //////////////////////////
 
-  public static generateConversationId(
-    userId1: string,
-    userId2: string
-  ): string {
+  public static generateConversationId(userId1: string, userId2: string): string {
     const sorted = [userId1, userId2].sort();
     return `dm:${sorted[0]}_${sorted[1]}`;
   }
@@ -212,16 +203,15 @@ export abstract class GeneralStorageProvider {
     await this.db.set(`conversation:${conversation.id}`, conversation);
   }
 
-  public async listConversationsForUser(
-    userId: string
-  ): Promise<Conversation[]> {
+  public async listConversations(): Promise<Conversation[]> {
+    return await this.db.list<Conversation>('conversation:');
+  }
+
+  public async listConversationsForUser(userId: string): Promise<Conversation[]> {
     const conversations = await this.db.list<Conversation>('conversation:');
     return conversations
       .filter((conv) => conv.participants.includes(userId))
-      .sort(
-        (a, b) =>
-          (b.lastMessageAt || b.createdAt) - (a.lastMessageAt || a.createdAt)
-      );
+      .sort((a, b) => (b.lastMessageAt || b.createdAt) - (a.lastMessageAt || a.createdAt));
   }
 
   public async listMessagesByConversation(
@@ -274,6 +264,23 @@ export abstract class GeneralStorageProvider {
     await this.db.delete(`webhook:${id}`);
   }
 
+  ///////////////////////
+  // Audit log methods //
+  ///////////////////////
+
+  public async createAuditLogEntry(entry: AuditLogEntry): Promise<void> {
+    await this.db.set(`audit:${entry.id}`, entry);
+  }
+
+  public async deleteAuditLogEntry(id: string): Promise<void> {
+    await this.db.delete(`audit:${id}`);
+  }
+
+  public async listAuditLog(): Promise<AuditLogEntry[]> {
+    const entries = await this.db.list<AuditLogEntry>('audit:');
+    return entries.sort((a, b) => b.createdAt - a.createdAt);
+  }
+
   /////////////////////////////
   // Secondary index helpers //
   /////////////////////////////
@@ -301,10 +308,7 @@ export abstract class GeneralStorageProvider {
    * Without `before`, returns the latest `limit` messages (oldest-first).
    * With `before`, returns `limit` messages before the cursor (oldest-first).
    */
-  private async paginateAndFetch(
-    index: string[],
-    options?: PaginationOptions
-  ): Promise<Message[]> {
+  private async paginateAndFetch(index: string[], options?: PaginationOptions): Promise<Message[]> {
     if (index.length === 0) return [];
 
     const limit = options?.limit ?? 0;

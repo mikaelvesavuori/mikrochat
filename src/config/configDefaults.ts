@@ -11,6 +11,7 @@ export const idConfig: IdConfigurationOptions = {
 
 export const configDefaults = () => {
   const debug = getTruthyValue(process.env.DEBUG) || false;
+  const serverPort = Number(process.env.MIKROCHAT_PORT || process.env.PORT) || 3000;
 
   return {
     auth: {
@@ -19,7 +20,7 @@ export const configDefaults = () => {
       jwtExpirySeconds: 15 * 60, // 15 minutes
       refreshTokenExpirySeconds: 7 * 24 * 60 * 60, // 7 days
       maxActiveSessions: 3,
-      appUrl: process.env.APP_URL || 'http://127.0.0.1:3000',
+      appUrl: process.env.APP_URL || 'http://127.0.0.1:8000',
       authMode: 'magic-link' as AuthMode,
       isInviteRequired: true,
       debug
@@ -40,8 +41,8 @@ export const configDefaults = () => {
       debug
     },
     server: {
-      port: Number(process.env.PORT) || 3000,
-      host: process.env.HOST || 'localhost',
+      port: serverPort,
+      host: process.env.HOST || '127.0.0.1',
       useHttps: false,
       useHttp2: false,
       sslCert: '',

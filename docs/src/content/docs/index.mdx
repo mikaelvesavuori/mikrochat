@@ -1,0 +1,46 @@
+---
+title: MikroChat
+description: Self-hosted chat without distractions.
+template: splash
+hero:
+  tagline: Self-hosted chat for teams who value simplicity. No vendor lock-in, no distractions.
+  image:
+    light: ../../assets/logo.svg
+    dark: ../../assets/logo.svg
+  actions:
+    - text: Get Started
+      link: /chat/docs/getting-started/intro
+      icon: rocket
+    - text: Installation
+      link: /chat/docs/getting-started/installation
+      icon: laptop
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+<CardGrid>
+  <Card title="Getting Started" icon="open-book">
+    Set up MikroChat and start chatting.
+
+    <LinkCard title="Introduction" href="/chat/docs/getting-started/intro" />
+    <LinkCard title="Installation" href="/chat/docs/getting-started/installation" />
+  </Card>
+
+  <Card title="Guides" icon="puzzle">
+    Deep dives into MikroChat features.
+
+    <LinkCard title="Configuration" href="/chat/docs/guides/configuration" />
+    <LinkCard title="Authentication" href="/chat/docs/guides/authentication" />
+    <LinkCard title="User Management" href="/chat/docs/guides/user-management" />
+    <LinkCard title="Webhooks" href="/chat/docs/guides/webhooks" />
+    <LinkCard title="Deployment" href="/chat/docs/guides/deployment" />
+  </Card>
+
+  <Card title="References" icon="document">
+    Complete API and configuration documentation.
+
+    <LinkCard title="Server Options" href="/chat/docs/reference/cli" />
+    <LinkCard title="API Reference" href="/chat/docs/reference/api" />
+    <LinkCard title="Comparison" href="/chat/docs/reference/comparison" />
+  </Card>
+</CardGrid>

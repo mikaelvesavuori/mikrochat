@@ -1,0 +1,105 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+  "root": false,
+  "vcs": {
+    "enabled": false,
+    "clientKind": "git",
+    "useIgnoreFile": false
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**", "!**/.astro", "!**/coverage", "!**/dist", "!**/node_modules"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "complexity": {
+        "noImportantStyles": "off",
+        "noStaticOnlyClass": "off",
+        "noUselessThisAlias": "error",
+        "noUselessTypeConstraint": "error",
+        "useArrowFunction": "off",
+        "useOptionalChain": "off"
+      },
+      "correctness": {
+        "noUnusedVariables": "error"
+      },
+      "style": {
+        "noNamespace": "error",
+        "noNonNullAssertion": "off",
+        "useAsConstAssertion": "error",
+        "useBlockStatements": "off",
+        "useConst": "error",
+        "noDescendingSpecificity": "off"
+      },
+      "suspicious": {
+        "noConsole": "off",
+        "noExplicitAny": "off",
+        "noExtraNonNullAssertion": "error",
+        "noMisleadingInstantiator": "error",
+        "noUnsafeDeclarationMerging": "error",
+        "useNamespaceKeyword": "error",
+        "noDuplicateProperties": "off"
+      },
+      "a11y": {
+        "noAutofocus": "off",
+        "noRedundantAlt": "off",
+        "noSvgWithoutTitle": "off",
+        "useAnchorContent": "off",
+        "useButtonType": "off"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  },
+  "json": {
+    "formatter": {
+      "trailingCommas": "none"
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": {
+          "level": "off",
+          "options": {
+            "identifierOrder": "lexicographic"
+          }
+        }
+      }
+    }
+  },
+  "overrides": [
+    {
+      "linter": {
+        "rules": {
+          "performance": {
+            "noDelete": "off"
+          },
+          "complexity": {
+            "noForEach": "off"
+          },
+          "suspicious": {
+            "noAssignInExpressions": "off",
+            "noPrototypeBuiltins": "off"
+          },
+          "style": {
+            "noNonNullAssertion": "off"
+          }
+        }
+      }
+    }
+  ]
+}

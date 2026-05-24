@@ -1,52 +1,52 @@
 import { state } from './state.mjs';
-import { AUTH_MODE, API_BASE_URL } from './config.mjs';
+import { API_BASE_URL } from './config.mjs';
 import { showToast } from './ui.mjs';
 import { getAccessToken, isTokenExpired, refreshTokens } from './auth.mjs';
 import { showAuthScreen } from './ui.mjs';
-import {
-  handleOfflineMessageCreation,
-  removeImageFromMessage
-} from './messages.mjs';
+import { removeImageFromMessage } from './messages.mjs';
+import { getAuthMode } from './runtime-config.mjs';
+import { icon } from './icons.mjs';
+import { storage } from './storage.mjs';
+
+const PUBLIC_AUTH_ENDPOINTS = new Set([
+  '/config.json',
+  '/auth/config',
+  '/auth/dev-login',
+  '/auth/login',
+  '/auth/oauth/providers',
+  '/auth/password-login',
+  '/auth/refresh',
+  '/auth/register',
+  '/auth/request-password-reset',
+  '/auth/setup-password',
+  '/auth/verify'
+]);
+
+function isPublicEndpoint(endpoint) {
+  return PUBLIC_AUTH_ENDPOINTS.has(endpoint) || endpoint.startsWith('/auth/oauth/');
+}
 
 /**
  * @description Helper function to make API requests to the MikroChat backend.
  */
-export async function apiRequest(
-  endpoint,
-  method = 'GET',
-  data = null,
-  tokenOverride = null
-) {
+export async function apiRequest(endpoint, method = 'GET', data = null, tokenOverride = null) {
   // Check if we're offline
   if (!navigator.onLine && method !== 'GET') {
-    // For non-GET requests while offline, handle specially
-    if (
-      endpoint.includes('/channels/') &&
-      endpoint.includes('/messages') &&
-      method === 'POST'
-    ) {
-      return handleOfflineMessageCreation(endpoint, data);
-    }
-
-    // For other non-GET requests, show offline message and reject
-    showToast(
-      "You're offline. This action will be available when you reconnect.",
-      'error'
-    );
+    showToast("You're offline. Reconnect before making changes.", 'error');
     throw new Error('Offline - cannot perform this action');
   }
 
-  if (AUTH_MODE !== 'dev' && endpoint !== '/auth/login') {
+  if (getAuthMode() !== 'dev' && !isPublicEndpoint(endpoint)) {
     try {
       if (await isTokenExpired()) {
         await refreshTokens();
         const newToken = await getAccessToken();
-        if (newToken) await state.storage.setItem('accessToken', newToken);
+        if (newToken) await storage.setItem('accessToken', newToken);
       }
     } catch (error) {
       console.error('Token refresh failed:', error);
 
-      await state.storage.removeItem('accessToken');
+      await storage.removeItem('accessToken');
       state.currentUser = null;
       await showAuthScreen();
 
@@ -59,10 +59,7 @@ export async function apiRequest(
     'Content-Type': 'application/json'
   };
 
-  let token = tokenOverride;
-
-  if (state.isStorageInitialized)
-    token = tokenOverride || (await getAccessToken());
+  const token = tokenOverride || (!isPublicEndpoint(endpoint) ? await getAccessToken() : null);
 
   if (token) headers.Authorization = `Bearer ${token}`;
 
@@ -103,12 +100,7 @@ export async function apiRequest(
         const clonedResponse = response.clone();
         return await clonedResponse.json();
       } catch (jsonError) {
-        console.error(
-          'JSON parsing error:',
-          jsonError,
-          'for endpoint:',
-          endpoint
-        );
+        console.error('JSON parsing error:', jsonError, 'for endpoint:', endpoint);
 
         // Fall back to text and see if we can manually parse it
         const text = await response.text();
@@ -135,10 +127,7 @@ export async function apiRequest(
   } catch (error) {
     // Check if error is due to being offline
     if (!navigator.onLine) {
-      showToast(
-        "You're working offline. Some features may be limited.",
-        'info'
-      );
+      showToast("You're working offline. Some features may be limited.", 'info');
     } else {
       showToast(error.message, 'error');
     }
@@ -191,13 +180,12 @@ export async function fetchImageWithAuth(
         imgWrapper.appendChild(img);
 
         const message = state.messageCache.get(messageId);
-        const isAuthor =
-          message?.author && message.author.id === state.currentUser.id;
+        const isAuthor = message?.author && message.author.id === state.currentUser.id;
 
         if (isAuthor) {
           const removeBtn = document.createElement('div');
           removeBtn.className = 'remove-image-btn';
-          removeBtn.innerHTML = '&times;';
+          removeBtn.innerHTML = icon('x-mark');
           removeBtn.onclick = function (e) {
             e.stopPropagation();
             if (confirm('Remove this image?')) {
@@ -214,8 +202,7 @@ export async function fetchImageWithAuth(
       console.error('Error fetching image:', error);
       const containerElement = document.getElementById(containerId);
       if (containerElement) {
-        containerElement.innerHTML =
-          '<div class="image-error">Failed to load image</div>';
+        containerElement.innerHTML = '<div class="image-error">Failed to load image</div>';
       }
     });
 }

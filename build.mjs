@@ -1,9 +1,14 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { build } from 'esbuild';
 import { minify } from 'html-minifier-terser';
 import { transform } from 'lightningcss';
 
 // This file builds the application (frontend, web app) part of MikroChat
+
+const DIST_DIR = './dist';
+
+rmSync(DIST_DIR, { recursive: true, force: true });
+mkdirSync(DIST_DIR, { recursive: true });
 
 ////////
 // JS //
@@ -69,3 +74,31 @@ const minified = await minify(html, {
 });
 
 writeFileSync('./dist/index.html', minified);
+
+////////////
+// Assets //
+////////////
+
+const staticFiles = [
+  'app-icon.svg',
+  'app-icon-192.png',
+  'app-icon-512.png',
+  'apple-touch-icon.png',
+  'config.js',
+  'favicon.svg',
+  'favicon-16.png',
+  'favicon-32.png',
+  'favicon.ico',
+  'manifest.json',
+  'manifest.webmanifest',
+  'offline.html',
+  'pwa.js'
+];
+
+cpSync('./icons', './dist/icons', { recursive: true });
+
+for (const fileName of staticFiles) {
+  cpSync(`./app/${fileName}`, `./dist/${fileName}`);
+}
+
+console.log('Static app assets copied to dist');

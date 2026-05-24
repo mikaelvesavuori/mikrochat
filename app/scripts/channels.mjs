@@ -4,6 +4,7 @@ import { apiRequest } from './api.mjs';
 import { showToast, renderChannelItem, updateDocumentTitle } from './ui.mjs';
 import { loadMessagesForChannel } from './messages.mjs';
 import { setupMessageEvents } from './events.mjs';
+import { storage } from './storage.mjs';
 
 /**
  * @description Load data for all channels on the server.
@@ -13,22 +14,25 @@ export async function loadChannels() {
     const { channels } = await apiRequest('/channels');
 
     channelsList.innerHTML = '';
+    state.channelCache.clear();
 
-    for (const channel of channels) await renderChannelItem(channel);
+    for (const channel of channels) {
+      state.channelCache.set(channel.id, channel);
+      await renderChannelItem(channel);
+    }
 
     if (channels.length > 0 && !state.currentChannelId) {
       let savedChannelId = null;
       try {
-        savedChannelId = await state.storage.getItem('currentChannelId');
+        savedChannelId = await storage.getItem('currentChannelId');
       } catch (_e) {
         // Fall through
       }
-      // Fallback to localStorage if encrypted storage didn't return a value
+      // Keep a legacy fallback for older local-only selections.
       if (!savedChannelId) {
         savedChannelId = localStorage.getItem('lastChannelId');
       }
-      const channelToSelect =
-        channels.find((c) => c.id === savedChannelId) || channels[0];
+      const channelToSelect = channels.find((c) => c.id === savedChannelId) || channels[0];
       await selectChannel(channelToSelect.id, channelToSelect.name);
     }
 
@@ -42,8 +46,7 @@ export async function loadChannels() {
  * @description Navigate to a given channel.
  */
 export async function selectChannel(channelId, channelName) {
-  if (channelId === state.currentChannelId && state.viewMode === 'channel')
-    return;
+  if (channelId === state.currentChannelId && state.viewMode === 'channel') return;
 
   // Clear DM selection
   state.currentConversationId = null;
@@ -56,8 +59,11 @@ export async function selectChannel(channelId, channelName) {
   currentChannelName.style.removeProperty('--channel-prefix');
 
   state.currentChannelId = channelId;
+  const cachedChannel = state.channelCache.get(channelId);
   currentChannelName.textContent = channelName;
-  await state.storage.setItem('currentChannelId', channelId);
+  if (cachedChannel?.topic) currentChannelName.title = cachedChannel.topic;
+  else currentChannelName.removeAttribute('title');
+  await storage.setItem('currentChannelId', channelId);
   localStorage.setItem('lastChannelId', channelId);
 
   // Reset unread count for this channel
@@ -70,9 +76,11 @@ export async function selectChannel(channelId, channelName) {
       channel.classList.add('active');
 
       // Update the channel item to remove notification badge
-      const channelObj = { id: channelId, name: channelName };
-      if (channel.querySelector('.channel-settings'))
-        channelObj.createdBy = state.currentUser.id;
+      const channelObj = state.channelCache.get(channelId) || {
+        id: channelId,
+        name: channelName
+      };
+      if (channel.querySelector('.channel-settings')) channelObj.createdBy = state.currentUser.id;
 
       await renderChannelItem(channelObj);
     } else {
@@ -88,9 +96,12 @@ export async function selectChannel(channelId, channelName) {
 /**
  * @description Create a channel and then directly navigate to it.
  */
-export async function createChannel(name) {
+export async function createChannel(name, options = {}) {
   try {
-    const { channel } = await apiRequest('/channels', 'POST', { name });
+    const { channel } = await apiRequest('/channels', 'POST', {
+      name,
+      ...options
+    });
     showToast(`Channel #${name} created successfully!`);
     await loadChannels();
     await selectChannel(channel.id, channel.name);
@@ -118,16 +129,16 @@ export async function deleteChannel(channelId) {
 /**
  * @description Update the name of a channel.
  */
-export async function updateChannelName(channelId, name) {
+export async function updateChannelName(channelId, name, options = {}) {
   try {
     const { channel } = await apiRequest(`/channels/${channelId}`, 'PUT', {
-      name
+      name,
+      ...options
     });
     showToast(`Channel renamed to #${name} successfully`);
 
     // Update current channel name if we're viewing the updated channel
-    if (state.currentChannelId === channelId)
-      currentChannelName.textContent = name;
+    if (state.currentChannelId === channelId) currentChannelName.textContent = name;
 
     await loadChannels();
 
@@ -144,7 +155,7 @@ export async function updateChannelName(channelId, name) {
 export async function restoreLastChannel() {
   let savedChannelId = null;
   try {
-    savedChannelId = await state.storage.getItem('currentChannelId');
+    savedChannelId = await storage.getItem('currentChannelId');
   } catch (_e) {
     // Fall through
   }
@@ -153,8 +164,6 @@ export async function restoreLastChannel() {
   }
   if (!savedChannelId) return;
 
-  const channelEl = document.querySelector(
-    `.channel-item[data-id="${savedChannelId}"]`
-  );
+  const channelEl = document.querySelector(`.channel-item[data-id="${savedChannelId}"]`);
   if (channelEl) channelEl.click();
 }

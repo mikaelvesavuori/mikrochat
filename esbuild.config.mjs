@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { build } from 'esbuild';
 
 // This file builds the API (backend) part of MikroChat
@@ -31,8 +31,10 @@ const getConfig = () => {
 
 const common = getConfig();
 
-build({
+mkdirSync('lib', { recursive: true });
+
+await build({
   ...common,
   format: 'esm',
   outfile: `lib/${outputFileName}.mjs`
-}).catch(() => process.exit(1));
+});

@@ -1,0 +1,294 @@
+---
+title: Deployment
+description: How to deploy MikroChat to production.
+---
+
+MikroChat consists of two parts that need to be deployed:
+
+1. **Frontend** -- static files (HTML, CSS, JavaScript) served by any web host
+2. **Backend** -- Node.js application that handles the API and real-time events
+
+## Download Release Archives
+
+```bash
+curl -sSL -o mikrochat_app.zip https://releases.mikrosuite.com/mikrochat_app_latest.zip
+curl -sSL -o mikrochat_api.zip https://releases.mikrosuite.com/mikrochat_api_latest.zip
+unzip mikrochat_app.zip -d mikrochat_app
+unzip mikrochat_api.zip -d mikrochat_api
+```
+
+## Frontend Deployment
+
+The frontend is a static site that can be deployed anywhere:
+
+- Netlify, Vercel, Cloudflare Pages
+- AWS S3 + CloudFront
+- Any web server (nginx, Apache, Caddy)
+
+### Configure the Frontend
+
+Edit `config.js` in the extracted app output with your production settings. Changes take effect on page reload:
+
+```javascript
+window.MIKROCHAT_CONFIG = {
+  API_BASE_URL: 'https://api.chat.example.com',
+  MAX_CONTENT_LENGTH: 1000,
+  DEBUG_MODE: false
+};
+```
+
+Authentication mode, email availability, and OAuth providers are served by the backend through `GET /config.json`; `GET /auth/config` remains available as a compatibility alias. Configure them in `mikrochat.config.json`.
+
+### Deploy Static Files
+
+Upload the extracted app files to your hosting provider:
+
+```bash
+# Example: deploy to a server with rsync
+rsync -avz mikrochat_app/*/ user@server:/var/www/chat/
+```
+
+## Backend Deployment
+
+The backend runs as a Node.js application. Deploy the extracted API archive to any Node.js hosting:
+
+- VPS (DigitalOcean, Hetzner, Linode)
+- Docker
+- Railway, Render, Fly.io
+- AWS EC2, GCP Compute Engine
+
+### Configuration
+
+Create `mikrochat.config.json` in the working directory, or use environment variables:
+
+```json
+{
+  "auth": {
+    "jwtSecret": "your-production-secret-key",
+    "authMode": "magic-link",
+    "appUrl": "https://chat.example.com",
+    "isInviteRequired": true
+  },
+  "chat": {
+    "initialUser": {
+      "userName": "admin",
+      "email": "admin@example.com"
+    }
+  },
+  "email": {
+    "user": "noreply@example.com",
+    "host": "smtp.example.com",
+    "password": "smtp-password"
+  },
+  "server": {
+    "port": 3000,
+    "host": "0.0.0.0",
+    "allowedDomains": ["https://chat.example.com"]
+  }
+}
+```
+
+### Start the Server
+
+```bash
+cd mikrochat_api/*
+node lib/mikrochat.mjs
+```
+
+With environment variables:
+
+```bash
+MIKROCHAT_PORT=3000 AUTH_JWT_SECRET=your-secret node lib/mikrochat.mjs
+```
+
+## VPS Deployment
+
+Create a systemd service for automatic restarts:
+
+```ini
+# /etc/systemd/system/mikrochat.service
+[Unit]
+Description=MikroChat Server
+After=network.target
+
+[Service]
+Type=simple
+User=mikrochat
+WorkingDirectory=/opt/mikrochat
+ExecStart=/usr/bin/node /opt/mikrochat/lib/mikrochat.mjs
+Restart=always
+RestartSec=10
+Environment="NODE_ENV=production"
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+
+```bash
+sudo systemctl enable mikrochat
+sudo systemctl start mikrochat
+sudo systemctl status mikrochat
+```
+
+### Docker
+
+Create a simple Dockerfile:
+
+```dockerfile
+FROM node:24-slim
+WORKDIR /app
+COPY lib ./lib
+COPY mikrochat.config.json .
+EXPOSE 3000
+CMD ["node", "lib/mikrochat.mjs"]
+```
+
+Build and run:
+
+```bash
+docker build -t mikrochat .
+docker run -d \
+  --name mikrochat \
+  --restart always \
+  -p 3000:3000 \
+  -v mikrochat-data:/app/mikrochat_db \
+  mikrochat
+```
+
+### PM2
+
+Use PM2 for process management:
+
+```bash
+pm2 start lib/mikrochat.mjs --name mikrochat
+pm2 save
+pm2 startup
+```
+
+## Reverse Proxy
+
+Put MikroChat behind a reverse proxy for HTTPS and better security.
+
+Caddy provides automatic HTTPS:
+
+```text
+# /etc/caddy/Caddyfile
+
+# Frontend
+chat.example.com {
+  root * /var/www/chat
+  file_server
+  try_files {path} /index.html
+}
+
+# Backend API
+api.chat.example.com {
+  reverse_proxy 127.0.0.1:3000
+}
+```
+
+### Nginx
+
+```nginx
+# Frontend
+server {
+  listen 443 ssl http2;
+  server_name chat.example.com;
+
+  ssl_certificate /path/to/cert.pem;
+  ssl_certificate_key /path/to/key.pem;
+
+  root /var/www/chat;
+  index index.html;
+
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+}
+
+# Backend API
+server {
+  listen 443 ssl http2;
+  server_name api.chat.example.com;
+
+  ssl_certificate /path/to/cert.pem;
+  ssl_certificate_key /path/to/key.pem;
+
+  location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_buffering off;
+    proxy_cache off;
+  }
+}
+```
+
+## Data Persistence
+
+MikroChat stores data in the `mikrochat_db` directory (configurable via `storage.databaseDirectory`). Ensure this directory:
+
+- Persists across restarts (use Docker volumes or persistent storage)
+- Is backed up regularly
+- Has appropriate permissions
+
+## CORS Configuration
+
+Configure allowed domains to prevent unauthorized access:
+
+```json
+{
+  "server": {
+    "allowedDomains": [
+      "https://chat.example.com"
+    ]
+  }
+}
+```
+
+Use `["*"]` only for private local testing.
+
+## Rate Limiting
+
+Enable rate limiting to prevent abuse:
+
+```json
+{
+  "server": {
+    "rateLimit": {
+      "enabled": true,
+      "requestsPerMinute": 100
+    }
+  }
+}
+```
+
+## Health Checks
+
+The backend provides a health endpoint for monitoring:
+
+```bash
+curl http://127.0.0.1:3000/health
+# Returns: OK
+```
+
+## Production Checklist
+
+Before going live:
+
+- Set a strong `jwtSecret` (use `openssl rand -base64 32`)
+- Set a `STORAGE_KEY` to enable [encryption at rest](../guides/configuration#encryption-at-rest)
+- Configure SMTP for magic link emails
+- Set `auth.authMode` to `"magic-link"` or `"password"` (not `"dev"`)
+- Configure `allowedDomains` (not `["*"]`)
+- Enable rate limiting
+- Set up HTTPS via reverse proxy or built-in SSL
+- Configure data backup for `mikrochat_db`
+- Back up your encryption key securely
+- Set up monitoring and health checks
+- Test the complete sign-in flow

@@ -2,7 +2,7 @@
   "auth": {
     "authMode": "password",
     "jwtSecret": "my-secret-super-random-key",
-    "appUrl": "http://localhost:8000",
+    "appUrl": "http://127.0.0.1:8000",
     "isInviteRequired": false
   },
   "chat": {
@@ -13,6 +13,7 @@
     }
   },
   "server": {
+    "host": "127.0.0.1",
     "allowedDomains": [
       "*"
     ]

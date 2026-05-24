@@ -1,1 +1,0 @@
-closeEditChannelModalEl.addEventListener('click', closeEditChannelModal);

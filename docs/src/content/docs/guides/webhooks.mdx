@@ -1,0 +1,96 @@
+---
+title: Webhooks
+description: Allow external services to post messages to MikroChat channels.
+---
+
+Webhooks let external services (e.g. CI/CD pipelines, monitoring tools, GitHub, etc.) send messages to MikroChat channels programmatically. Each webhook is scoped to a single channel, authenticates with a static token, and messages appear with a custom bot name and "BOT" badge.
+
+## Creating a Webhook
+
+### Via the UI
+
+1. Click on the server name to open **Server Settings** (admin only)
+2. Scroll to the **Webhooks** section
+3. Enter a **Bot Name** (e.g., "GitHub Bot")
+4. Select the target **Channel**
+5. Click **Create Webhook**
+6. Copy the token immediately — it is only shown once
+
+### Via the API
+
+```bash
+curl -X POST http://127.0.0.1:3000/webhooks \
+  -H "Authorization: Bearer <your-jwt-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "GitHub Bot", "channelId": "channel-id-here"}'
+```
+
+The response includes the webhook token:
+
+```json
+{
+  "webhook": {
+    "id": "wh_abc123",
+    "name": "GitHub Bot",
+    "channelId": "channel-id",
+    "token": "a1b2c3d4e5f6..."
+  }
+}
+```
+
+Note down the webhook `id` and save the `token` — it will not be shown again.
+
+## Posting Messages
+
+Use the webhook token (not a JWT) to post messages:
+
+```bash
+curl -X POST http://127.0.0.1:3000/webhooks/<webhook-id>/messages \
+  -H "Authorization: Bearer <webhook-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Build #42 passed!"}'
+```
+
+The message appears in the channel with the webhook's bot name and a "BOT" badge.
+
+## Integration Examples
+
+### GitHub Actions
+
+```yaml
+- name: Notify MikroChat
+  run: |
+    curl -X POST ${{ secrets.MIKROCHAT_URL }}/webhooks/${{ secrets.WEBHOOK_ID }}/messages \
+      -H "Authorization: Bearer ${{ secrets.WEBHOOK_TOKEN }}" \
+      -H "Content-Type: application/json" \
+      -d "{\"content\": \"Deploy completed for ${{ github.ref_name }}\"}"
+```
+
+### Node.js
+
+```javascript
+async function notifyChat(message) {
+  await fetch(`${MIKROCHAT_URL}/webhooks/${WEBHOOK_ID}/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${WEBHOOK_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ content: message })
+  });
+}
+```
+
+## Managing Webhooks
+
+- **List webhooks:** `GET /webhooks` (admin only, tokens are not included)
+- **Delete a webhook:** `DELETE /webhooks/:webhookId` (admin only)
+- Deleting a channel automatically deletes all webhooks associated with it
+
+## Security Notes
+
+- Webhook tokens are 32-byte random hex strings (64 characters)
+- Tokens are shown only once at creation time
+- Store tokens securely (e.g., environment variables, secret managers)
+- Each webhook is scoped to exactly one channel
+- Only admins can create, list, and delete webhooks

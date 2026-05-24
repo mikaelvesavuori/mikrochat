@@ -1,4 +1,1 @@
-npx tsc
-npm run lint
-npm test
-git add .
+npm run precommit

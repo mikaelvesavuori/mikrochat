@@ -1,5 +1,6 @@
 import { apiRequest } from './api.mjs';
 import { showToast, showLoading, hideLoading } from './ui.mjs';
+import { icon } from './icons.mjs';
 
 /**
  * @description Load and display all webhooks in the settings panel.
@@ -46,7 +47,7 @@ export async function loadWebhooks() {
             </div>
           </div>
           <div class="webhook-actions">
-            <button class="remove-webhook" title="Delete Webhook">&#10005;</button>
+            <button class="remove-webhook" title="Delete Webhook">${icon('x-mark')}</button>
           </div>
         `;
 

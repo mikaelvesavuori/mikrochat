@@ -5,7 +5,6 @@ import {
   emailInput,
   loginButton,
   textElement,
-  encryptionForm,
   emailForm,
   authPasswordGroup,
   authPasswordConfirmGroup,
@@ -18,33 +17,33 @@ import {
   loading,
   createChannelModal,
   channelNameInput,
+  channelTopicInput,
+  channelPrivateInput,
+  channelMembersInput,
   reactionPickerModal,
   editMessageInput,
   editMessageModal,
   editChannelNameInput,
+  editChannelTopicInput,
+  editChannelPrivateInput,
+  editChannelMembersInput,
   editChannelModal,
   oauthProviders,
   authDivider,
   authForgotPassword,
   passwordResetSentForm,
-  passwordResetSentMessage
+  passwordResetSentMessage,
+  quotedMessageBar,
+  quotedMessageText
 } from './dom.mjs';
-import {
-  AUTH_MODE,
-  DEFAULT_PASSWORD,
-  HAS_EMAIL,
-  ENABLE_OAUTH
-} from './config.mjs';
+import { getAuthConfig, getAuthMode, hasEmailConfig, isOAuthEnabled } from './runtime-config.mjs';
 import { getUrlParams } from './url.mjs';
 import { isMagicLinkUrl } from './magiclink.mjs';
-import {
-  isAuthenticated,
-  isEncryptionPasswordRequired,
-  getUserInfo
-} from './auth.mjs';
-import { setupStorage } from './storage.mjs';
+import { getUserInfo, isAuthenticated, signin } from './auth.mjs';
 import { getInitials, getReactionsContainer } from './utils.mjs';
 import { setTheme } from './theme.mjs';
+import { icon, reactionIcon } from './icons.mjs';
+import { storage } from './storage.mjs';
 
 /////////////
 // SCREENS //
@@ -55,55 +54,30 @@ import { setTheme } from './theme.mjs';
  */
 export async function showAuthScreen() {
   closeAllModals();
+  resetAuthForm();
 
-  authContainer.style.display = 'block';
+  authContainer.style.display = 'grid';
   appContainer.style.display = 'none';
 
   // Set up OAuth provider buttons (non-blocking)
   setupOAuthProviders();
 
   const authed = isAuthenticated();
+  const authMode = getAuthMode();
 
-  /*
-  // Cases for Dev Mode
-  - Already authenticated, shared encryption key -> <App screen>
-  - Already authenticated, user-specific encryption key -> Display encryption key input -> <App screen>
-  - Unauthenticated, shared encryption key -> Display email input -> <App screen>
-  - Unauthenticated, user-specific encryption key -> Display email + encryption key input -> <App screen>
-  */
-  if (AUTH_MODE === 'dev') {
-    if (isEncryptionPasswordRequired())
-      return renderDevModeEncryptionSignInView();
-
-    if (authed) return renderDevModeEncryptionSignInView();
+  if (authMode === 'dev') {
+    if (authed) {
+      return await showAppScreen();
+    }
 
     return renderDevModePlainSignInView();
   }
 
-  /*
-  // Cases for Magic Link Mode
-  - On magic link URL with email and token parameters, shared encryption key -> <App screen>
-  - On magic link URL with email and token parameters, user-specific encryption key -> Display encryption key input -> <App screen>
-  - Already authenticated, shared encryption key -> <App screen>
-  - Already authenticated, user-specific encryption key -> Display encryption key input -> <App screen>
-  - Unauthenticated, shared encryption key -> Display email input -> <Success screen>
-  - Unauthenticated, user-specific encryption key -> Display email input -> <Success screen>
-  */
-  if (AUTH_MODE === 'magic-link') {
-    if (isMagicLinkUrl()) {
-      if (isEncryptionPasswordRequired())
-        return renderMagicLinkEncryptionSignInView();
-
-      return signInWithMagicLink();
-    }
+  if (authMode === 'magic-link') {
+    if (isMagicLinkUrl()) return signInWithMagicLink();
 
     if (authed) {
-      if (isEncryptionPasswordRequired())
-        return renderMagicLinkEncryptionSignInView();
-
-      // Sign in pre-authenticated user with default encryption key
-      await setupStorage(DEFAULT_PASSWORD);
-      //return await showAppScreen();
+      return await showAppScreen();
     }
 
     return renderMagicLinkUnauthenticatedView();
@@ -115,16 +89,14 @@ export async function showAuthScreen() {
   - Already authenticated -> <App screen>
   - Unauthenticated -> Display email + password sign in form
   */
-  if (AUTH_MODE === 'password') {
+  if (authMode === 'password') {
     const { emailParam, tokenParam, resetParam } = getUrlParams();
 
-    if (emailParam && tokenParam && resetParam)
-      return renderPasswordResetView(emailParam);
+    if (emailParam && tokenParam && resetParam) return renderPasswordResetView(emailParam);
 
     if (emailParam && tokenParam) return renderPasswordSetupView(emailParam);
 
     if (authed) {
-      await setupStorage(DEFAULT_PASSWORD);
       return await showAppScreen();
     }
 
@@ -134,18 +106,17 @@ export async function showAuthScreen() {
 
 /**
  * @description Fetch and render OAuth provider buttons on the auth screen.
- * Only runs when ENABLE_OAUTH is true. Non-blocking.
+ * Uses server-reported OAuth capability. Non-blocking.
  */
 async function setupOAuthProviders() {
-  if (!ENABLE_OAUTH) {
+  if (!isOAuthEnabled()) {
     oauthProviders.style.display = 'none';
     authDivider.style.display = 'none';
     return;
   }
 
   try {
-    const { fetchOAuthProviders, getProviderIcon, initiateOAuth } =
-      await import('./oauth.mjs');
+    const { fetchOAuthProviders, getProviderIcon, initiateOAuth } = await import('./oauth.mjs');
     const providers = await fetchOAuthProviders();
 
     if (providers.length === 0) {
@@ -164,7 +135,7 @@ async function setupOAuthProviders() {
       })
       .join('');
 
-    oauthProviders.style.display = 'block';
+    oauthProviders.style.display = 'grid';
     authDivider.style.display = 'flex';
 
     oauthProviders.querySelectorAll('.oauth-btn').forEach((btn) => {
@@ -182,49 +153,18 @@ async function setupOAuthProviders() {
 /**
  * @description Sign in user with magic link URL parameters.
  */
-export function signInWithMagicLink() {
+export async function signInWithMagicLink() {
   const { emailParam } = getUrlParams();
   emailInput.value = emailParam;
-  loginButton.click();
+  return await signin(emailParam);
 }
 
 /**
  * @description Dev mode sign in: Only show email input.
  */
 export function renderDevModePlainSignInView() {
+  resetAuthForm();
   textElement.textContent = 'Enter your email to sign in.';
-  encryptionForm.style.display = 'none';
-
-  hideLoading();
-}
-
-/**
- * @description Dev mode sign in: Show both email and encryption key inputs.
- */
-export function renderDevModeEncryptionSignInView() {
-  textElement.textContent = 'Enter your email and encryption key to sign in.';
-  encryptionForm.style.display = 'block';
-
-  hideLoading();
-}
-
-/**
- * @description Magic link sign in: Show encryption input and only show email input
- * if the user is not on a magic link URL path.
- */
-export function renderMagicLinkEncryptionSignInView() {
-  textElement.textContent = 'Enter your encryption key to sign in.';
-
-  const hideEmail = isMagicLinkUrl();
-  if (hideEmail) {
-    // Hide email input and autofill it with the value from the URL
-    emailForm.getElementsByTagName('label')[0].style.display = 'none';
-    emailInput.style.display = 'none';
-    const { emailParam } = getUrlParams();
-    emailInput.value = emailParam;
-  }
-
-  encryptionForm.style.display = 'block';
 
   hideLoading();
 }
@@ -233,8 +173,8 @@ export function renderMagicLinkEncryptionSignInView() {
  * @description Magic link sign in: Show only the email input.
  */
 export function renderMagicLinkUnauthenticatedView() {
-  textElement.textContent = 'Enter your email to get a magic link.';
-  encryptionForm.style.display = 'none';
+  resetAuthForm();
+  textElement.textContent = 'Enter your email to request a sign-in link.';
 
   hideLoading();
 }
@@ -243,13 +183,13 @@ export function renderMagicLinkUnauthenticatedView() {
  * @description Password mode: Show email + password sign in form.
  */
 export function renderPasswordSignInView() {
+  resetAuthForm();
   textElement.textContent = 'Enter your email and password to sign in.';
-  encryptionForm.style.display = 'none';
   authPasswordGroup.style.display = 'block';
   authPasswordConfirmGroup.style.display = 'none';
   authToggle.style.display = 'none';
-  authForgotPassword.style.display = HAS_EMAIL ? 'block' : 'none';
-  loginButton.textContent = 'Sign In';
+  authForgotPassword.style.display = hasEmailConfig() ? 'block' : 'none';
+  setLoginButtonLabel('Sign in');
 
   hideLoading();
 }
@@ -258,14 +198,14 @@ export function renderPasswordSignInView() {
  * @description Password mode: Show "Set your password" form for invite flow.
  */
 export function renderPasswordSetupView(email) {
+  resetAuthForm();
   textElement.textContent = 'Set your password to complete registration.';
   emailForm.style.display = 'none';
   emailInput.value = email;
-  encryptionForm.style.display = 'none';
   authPasswordGroup.style.display = 'block';
   authPasswordConfirmGroup.style.display = 'block';
   authToggle.style.display = 'none';
-  loginButton.textContent = 'Set Password';
+  setLoginButtonLabel('Set password');
 
   hideLoading();
 }
@@ -274,14 +214,14 @@ export function renderPasswordSetupView(email) {
  * @description Password mode: Show email + password + confirm for registration.
  */
 export function renderPasswordRegisterView() {
+  resetAuthForm();
   textElement.textContent = 'Create your account.';
   emailForm.style.display = 'block';
-  encryptionForm.style.display = 'none';
   authPasswordGroup.style.display = 'block';
   authPasswordConfirmGroup.style.display = 'block';
   authToggle.style.display = 'block';
-  authToggleLink.textContent = 'Already have an account? Sign In';
-  loginButton.textContent = 'Create Account';
+  authToggleLink.textContent = 'Already have an account? Sign in';
+  setLoginButtonLabel('Create account');
 
   hideLoading();
 }
@@ -290,16 +230,15 @@ export function renderPasswordRegisterView() {
  * @description Password mode: Show "Forgot password?" screen with email input only.
  */
 export function renderForgotPasswordView() {
-  textElement.textContent =
-    'Enter your email to receive a password reset link.';
+  resetAuthForm();
+  textElement.textContent = 'Enter your email to receive a password reset link.';
   emailForm.style.display = 'block';
   emailInput.value = '';
-  encryptionForm.style.display = 'none';
   authPasswordGroup.style.display = 'none';
   authPasswordConfirmGroup.style.display = 'none';
   authToggle.style.display = 'none';
   authForgotPassword.style.display = 'none';
-  loginButton.textContent = 'Send Reset Link';
+  setLoginButtonLabel('Send reset link');
 
   hideLoading();
 }
@@ -308,15 +247,15 @@ export function renderForgotPasswordView() {
  * @description Password mode: Show "Reset your password" form from a reset link.
  */
 export function renderPasswordResetView(email) {
+  resetAuthForm();
   textElement.textContent = 'Reset your password.';
   emailForm.style.display = 'none';
   emailInput.value = email;
-  encryptionForm.style.display = 'none';
   authPasswordGroup.style.display = 'block';
   authPasswordConfirmGroup.style.display = 'block';
   authToggle.style.display = 'none';
   authForgotPassword.style.display = 'none';
-  loginButton.textContent = 'Reset Password';
+  setLoginButtonLabel('Reset password');
 
   hideLoading();
 }
@@ -327,9 +266,45 @@ export function renderPasswordResetView(email) {
 export function renderPasswordResetSent(message) {
   document.querySelector('.auth-form').style.display = 'none';
   passwordResetSentMessage.textContent =
-    message ||
-    'If a matching account was found, a password reset link has been sent. Please check your inbox.';
+    message || 'If this email can reset a password, you will receive a link shortly.';
   passwordResetSentForm.style.display = 'block';
+}
+
+function resetAuthForm() {
+  document.querySelectorAll('.auth-form').forEach((form) => {
+    form.style.display = 'none';
+  });
+
+  const defaultForm = document.getElementById('default-form');
+  if (defaultForm) defaultForm.style.display = 'block';
+
+  emailForm.style.display = 'block';
+  const emailLabel = emailForm.getElementsByTagName('label')[0];
+  if (emailLabel) emailLabel.style.display = '';
+  emailInput.style.display = '';
+  authPasswordGroup.style.display = 'none';
+  authPasswordConfirmGroup.style.display = 'none';
+  authToggle.style.display = 'none';
+  authForgotPassword.style.display = 'none';
+  setLoginButtonLabel(getDefaultAuthButtonLabel());
+}
+
+function setLoginButtonLabel(label) {
+  const labelElement = loginButton.querySelector('span');
+  if (labelElement) {
+    labelElement.textContent = label;
+    return;
+  }
+
+  loginButton.textContent = label;
+}
+
+function getDefaultAuthButtonLabel() {
+  const authConfig = getAuthConfig();
+
+  if (authConfig.mode === 'magic-link') return 'Request sign-in link';
+  if (authConfig.mode === 'password') return 'Sign in';
+  return 'Continue';
 }
 
 /**
@@ -337,15 +312,13 @@ export function renderPasswordResetSent(message) {
  */
 export async function renderNewMagicLink(email) {
   const { apiRequest } = await import('./api.mjs');
-  const response = await apiRequest('/auth/login', 'POST', { email });
+  await apiRequest('/auth/login', 'POST', { email });
 
   document.querySelector('.auth-form').style.display = 'none';
   const magicLinkForm = document.getElementById('magic-link-sent-form');
   const magicLinkMessage = document.getElementById('magic-link-sent-message');
 
-  magicLinkMessage.textContent =
-    response.message ||
-    `Magic link sent to ${email}. Please check your inbox and click the link to continue.`;
+  magicLinkMessage.textContent = 'If this email can sign in, you will receive a link shortly.';
 
   magicLinkForm.style.display = 'block';
 }
@@ -369,6 +342,7 @@ export async function showAppScreen() {
   await loadServerName();
   await loadChannels();
   await loadConversations();
+  await loadPresence();
 
   userAvatar.textContent = getInitials(state.currentUser.userName);
   userName.textContent = state.currentUser.userName;
@@ -378,10 +352,21 @@ export async function showAppScreen() {
 
   await restoreLastChannel();
 
-  const savedTheme = (await state.storage.getItem('darkMode')) !== 'false';
+  const savedTheme = (await storage.getItem('darkMode')) !== 'false';
   await setTheme(savedTheme);
 
   hideLoading();
+}
+
+async function loadPresence() {
+  try {
+    const { apiRequest } = await import('./api.mjs');
+    const response = await apiRequest('/presence');
+    state.presence.clear();
+    for (const presence of response.presence || []) state.presence.set(presence.userId, presence);
+  } catch (error) {
+    console.warn('Failed to load presence:', error);
+  }
 }
 
 //////////////
@@ -394,9 +379,7 @@ export async function showAppScreen() {
 export async function renderChannelItem(channel) {
   const { selectChannel } = await import('./channels.mjs');
 
-  let channelItem = document.querySelector(
-    `.channel-item[data-id="${channel.id}"]`
-  );
+  let channelItem = document.querySelector(`.channel-item[data-id="${channel.id}"]`);
 
   if (!channelItem) {
     channelItem = document.createElement('div');
@@ -415,8 +398,14 @@ export async function renderChannelItem(channel) {
 
   // Add channel name
   const channelContent = document.createElement('div');
-  channelContent.textContent = channel.name;
   channelContent.className = 'channel-name';
+  if (channel.topic) channelContent.title = channel.topic;
+  if (channel.isPrivate) {
+    channelContent.innerHTML = `${icon('lock-closed', 'icon channel-lock-icon')}<span class="channel-name-text"></span>`;
+  } else {
+    channelContent.innerHTML = '<span class="channel-name-text"></span>';
+  }
+  channelContent.querySelector('.channel-name-text').textContent = channel.name;
   channelItem.appendChild(channelContent);
 
   // Add notification indicator if there are unread messages
@@ -431,7 +420,7 @@ export async function renderChannelItem(channel) {
   if (channel.createdBy === state.currentUser.id) {
     const settingsButton = document.createElement('div');
     settingsButton.className = 'channel-settings';
-    settingsButton.innerHTML = '⚙️';
+    settingsButton.innerHTML = icon('cog-6-tooth');
     settingsButton.addEventListener('click', (e) => {
       e.stopPropagation();
       openEditChannelModal(channel);
@@ -440,8 +429,7 @@ export async function renderChannelItem(channel) {
   }
 
   // Set active state
-  if (channel.id === state.currentChannelId)
-    channelItem.classList.add('active');
+  if (channel.id === state.currentChannelId) channelItem.classList.add('active');
   else channelItem.classList.remove('active');
 }
 
@@ -452,7 +440,7 @@ export function updatePendingUploadsUI() {
   const container = document.getElementById('pending-uploads-container');
   const uploadsContainer = document.getElementById('pending-uploads');
 
-  if (state.pendingUploads.length === 0) {
+  if (state.pendingUploads.length === 0 && state.pendingFiles.length === 0) {
     container.style.display = 'none';
     return;
   }
@@ -465,7 +453,18 @@ export function updatePendingUploadsUI() {
     uploadDiv.className = 'pending-upload';
     uploadDiv.innerHTML = `
       <img src="${upload.preview}" alt="Upload preview">
-      <div class="remove-upload" data-index="${index}">&times;</div>
+      <div class="remove-upload" data-index="${index}">${icon('x-mark')}</div>
+    `;
+    uploadsContainer.appendChild(uploadDiv);
+  });
+
+  state.pendingFiles.forEach((upload, index) => {
+    const uploadDiv = document.createElement('div');
+    uploadDiv.className = 'pending-file';
+    uploadDiv.innerHTML = `
+      <span class="pending-file-icon">${icon('paper-clip', 'icon file-icon')}</span>
+      <span class="pending-file-name">${upload.name}</span>
+      <div class="remove-file-upload" data-index="${index}">${icon('x-mark')}</div>
     `;
     uploadsContainer.appendChild(uploadDiv);
   });
@@ -474,8 +473,17 @@ export function updatePendingUploadsUI() {
   removeButtons.forEach((button) => {
     button.addEventListener('click', async (e) => {
       const { removePendingUpload } = await import('./images.mjs');
-      const index = Number.parseInt(e.target.dataset.index, 10);
+      const index = Number.parseInt(e.currentTarget.dataset.index, 10);
       removePendingUpload(index);
+    });
+  });
+
+  const removeFileButtons = document.querySelectorAll('.remove-file-upload');
+  removeFileButtons.forEach((button) => {
+    button.addEventListener('click', async (e) => {
+      const { removePendingFile } = await import('./files.mjs');
+      const index = Number.parseInt(e.currentTarget.dataset.index, 10);
+      removePendingFile(index);
     });
   });
 }
@@ -494,7 +502,7 @@ export async function renderReaction(messageId, reaction, count, userReacted) {
   reactionElement.dataset.reaction = reaction;
   reactionElement.dataset.messageId = messageId;
   reactionElement.innerHTML = `
-        <span class="reaction-reaction">${reaction}</span>
+        <span class="reaction-symbol">${reactionIcon(reaction)}</span>
         <span class="reaction-count">${count}</span>
       `;
 
@@ -571,6 +579,21 @@ export function scrollToBottom() {
   }
 }
 
+export function updateQuotedMessageUI() {
+  if (!quotedMessageBar || !quotedMessageText) return;
+
+  if (!state.quotedMessage) {
+    quotedMessageBar.style.display = 'none';
+    quotedMessageText.textContent = '';
+    return;
+  }
+
+  const author = state.quotedMessage.author?.userName || 'Someone';
+  const content = state.quotedMessage.content || 'Attachment';
+  quotedMessageText.textContent = `${author}: ${content}`;
+  quotedMessageBar.style.display = 'flex';
+}
+
 /////////////
 // LOADING //
 /////////////
@@ -595,6 +618,9 @@ export function openCreateChannelModal() {
 export function closeCreateChannelModal() {
   createChannelModal.classList.remove('active');
   channelNameInput.value = '';
+  if (channelTopicInput) channelTopicInput.value = '';
+  if (channelPrivateInput) channelPrivateInput.checked = false;
+  if (channelMembersInput) channelMembersInput.value = '';
 }
 
 export function openReactionPicker(messageId) {
@@ -623,6 +649,12 @@ export function closeEditModal() {
 export function openEditChannelModal(channel) {
   state.currentChannelForEdit = channel;
   editChannelNameInput.value = channel.name;
+  if (editChannelTopicInput) editChannelTopicInput.value = channel.topic || '';
+  if (editChannelPrivateInput) editChannelPrivateInput.checked = channel.isPrivate === true;
+  if (editChannelMembersInput)
+    editChannelMembersInput.value = (channel.members || [])
+      .map((id) => state.userCache.get(id)?.userName || id)
+      .join(', ');
   editChannelModal.classList.add('active');
   editChannelNameInput.focus();
 }
@@ -630,6 +662,9 @@ export function openEditChannelModal(channel) {
 export function closeEditChannelModal() {
   editChannelModal.classList.remove('active');
   editChannelNameInput.value = '';
+  if (editChannelTopicInput) editChannelTopicInput.value = '';
+  if (editChannelPrivateInput) editChannelPrivateInput.checked = false;
+  if (editChannelMembersInput) editChannelMembersInput.value = '';
   state.currentChannelForEdit = null;
 }
 
@@ -674,14 +709,13 @@ export function updateDocumentTitle() {
 export async function showDesktopNotification(title, body) {
   if (!('Notification' in window) || document.hasFocus()) return;
 
-  if (Notification.permission === 'default')
-    await Notification.requestPermission();
+  if (Notification.permission === 'default') await Notification.requestPermission();
 
   if (Notification.permission !== 'granted') return;
 
   const notification = new Notification(title, {
     body,
-    icon: '/icons/icon-192.png'
+    icon: '/app-icon-192.png'
   });
 
   notification.onclick = () => {

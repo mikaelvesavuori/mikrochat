@@ -6,6 +6,7 @@ import { apiRequest } from './api.mjs';
 import { showToast, openEditModal } from './ui.mjs';
 import { formatMessageContent, formatMessageTime } from './messages.mjs';
 import { getInitials } from './utils.mjs';
+import { icon } from './icons.mjs';
 
 /**
  * @description Open a thread panel for a parent message.
@@ -183,14 +184,14 @@ function getOrCreateThreadPanel() {
   panel.innerHTML = `
     <div class="thread-header" id="thread-header">
       <div class="thread-title">Thread</div>
-      <button class="close-thread" id="close-thread-btn">&times;</button>
+      <button class="close-thread" id="close-thread-btn">${icon('x-mark')}</button>
     </div>
     <div class="thread-parent" id="thread-parent"></div>
     <div class="thread-divider">Replies</div>
     <div class="thread-messages" id="thread-messages"></div>
     <div class="thread-input-area">
-      <textarea class="message-input" id="thread-message-input" placeholder="Reply in thread..."></textarea>
-      <button class="send-button" id="thread-send-button">&rarr;</button>
+      <textarea class="message-input" id="thread-message-input" placeholder="Reply in thread..." rows="1"></textarea>
+      <button class="send-button" id="thread-send-button">${icon('arrow-right')}</button>
     </div>
   `;
 

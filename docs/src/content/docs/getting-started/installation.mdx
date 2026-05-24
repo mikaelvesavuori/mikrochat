@@ -1,0 +1,103 @@
+---
+title: Installation
+description: Get MikroChat running locally or on a server.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+## Prerequisites
+
+- Node.js 24 or later
+- Basic comfort with the command line
+
+## Download the Release Archives
+
+<Steps>
+
+1. **Download the app and API**
+
+   ```bash
+   curl -sSL -o mikrochat_app.zip https://releases.mikrosuite.com/mikrochat_app_latest.zip
+   curl -sSL -o mikrochat_api.zip https://releases.mikrosuite.com/mikrochat_api_latest.zip
+   unzip mikrochat_app.zip -d mikrochat_app
+   unzip mikrochat_api.zip -d mikrochat_api
+   ```
+
+2. **Configure the API**
+
+   Create `mikrochat.config.json` beside the extracted API bundle. An example configuration with password sign-in can look like this:
+
+   ```json
+   {
+     "auth": {
+       "authMode": "password",
+       "jwtSecret": "CHANGE-ME-use-a-random-string-at-least-32-characters",
+       "appUrl": "http://127.0.0.1:8000",
+       "isInviteRequired": false
+     },
+     "chat": {
+       "initialUser": {
+         "userName": "admin",
+         "email": "admin@yourdomain.com",
+         "password": "change-me-on-first-login"
+       }
+     },
+     "server": {
+       "allowedDomains": ["*"]
+     }
+   }
+   ```
+
+   :::tip
+   Generate a strong JWT secret with: `openssl rand -base64 32`
+   :::
+
+3. **Start the API**
+
+   ```bash
+   cd mikrochat_api/*
+   node lib/mikrochat.mjs
+   ```
+
+   The API starts on `http://127.0.0.1:3000`.
+
+4. **Serve the frontend**
+
+   Point your web server at the extracted app directory. For example, with Caddy:
+
+   ```text
+   127.0.0.1:8000 {
+     root * /path/to/mikrochat_app
+     file_server
+     try_files {path} /index.html
+   }
+   ```
+
+   Or for a quick test, use any static file server:
+
+   ```bash
+   cd ../../mikrochat_app/*
+   npx http-server . -a 127.0.0.1 -p 8000 -c-1
+   ```
+
+5. **Sign in**
+
+   Open `http://127.0.0.1:8000` in your browser and sign in with your configured initial user's email and password.
+
+</Steps>
+
+## Release Downloads
+
+The latest release archives are available from GitHub Releases and these stable URLs:
+
+- `https://releases.mikrosuite.com/mikrochat_app_latest.zip` - static browser app
+- `https://releases.mikrosuite.com/mikrochat_api_latest.zip` - Node API bundle
+
+## Next Steps
+
+- [Configuration](../guides/configuration) -- All configuration options explained
+- [Authentication](../guides/authentication) -- Dev mode, magic link, password, and OAuth 2.0
+- [User Management](../guides/user-management) -- Adding and managing users
+- [Deployment](../guides/deployment) -- Production deployment guide
+- [Server Options](../reference/cli) -- Server flags, environment variables, and config priority
+- [API Reference](../reference/api) -- HTTP API endpoints

@@ -4,9 +4,7 @@ import { MikroChat } from '../src/MikroChat';
 import { InMemoryProvider } from '../src/providers/InMemoryProvider';
 import type { ChatConfiguration, ServerSentEvent } from '../src/interfaces';
 
-const createTestConfig = (
-  overrides?: Partial<ChatConfiguration>
-): ChatConfiguration => ({
+const createTestConfig = (overrides?: Partial<ChatConfiguration>): ChatConfiguration => ({
   initialUser: {
     id: 'admin-user-id',
     userName: 'admin',
@@ -60,35 +58,35 @@ describe('MikroChat', () => {
       });
 
       it('should add an admin user when requested by admin', async () => {
-        const user = await chat.addUser(
-          'newadmin@test.com',
-          'admin-user-id',
-          true
-        );
+        const user = await chat.addUser('newadmin@test.com', 'admin-user-id', true);
         expect(user.isAdmin).toBe(true);
       });
 
       it('should throw error when non-admin tries to add admin', async () => {
-        const regularUser = await chat.addUser(
-          'regular@test.com',
-          'admin-user-id'
+        const regularUser = await chat.addUser('regular@test.com', 'admin-user-id');
+        await expect(chat.addUser('another@test.com', regularUser.id, true)).rejects.toThrow(
+          'Only administrators can add admin users'
         );
-        await expect(
-          chat.addUser('another@test.com', regularUser.id, true)
-        ).rejects.toThrow('Only administrators can add admin users');
+      });
+
+      it('should throw error when non-admin tries to add a user', async () => {
+        const regularUser = await chat.addUser('regular@test.com', 'admin-user-id');
+        await expect(chat.addUser('another@test.com', regularUser.id)).rejects.toThrow(
+          'Only administrators can add users'
+        );
       });
 
       it('should throw error when adding duplicate email', async () => {
         await chat.addUser('duplicate@test.com', 'admin-user-id');
-        await expect(
-          chat.addUser('duplicate@test.com', 'admin-user-id')
-        ).rejects.toThrow('User with this email already exists');
+        await expect(chat.addUser('duplicate@test.com', 'admin-user-id')).rejects.toThrow(
+          'User with this email already exists'
+        );
       });
 
       it('should throw error when adder does not exist', async () => {
-        await expect(
-          chat.addUser('newuser@test.com', 'nonexistent-id')
-        ).rejects.toThrow('User not found');
+        await expect(chat.addUser('newuser@test.com', 'nonexistent-id')).rejects.toThrow(
+          'User not found'
+        );
       });
 
       it('should allow force creation without existing user', async () => {
@@ -121,44 +119,34 @@ describe('MikroChat', () => {
       });
 
       it('should throw error when non-admin tries to remove user', async () => {
-        const regularUser = await chat.addUser(
-          'regular@test.com',
-          'admin-user-id'
+        const regularUser = await chat.addUser('regular@test.com', 'admin-user-id');
+        const anotherUser = await chat.addUser('another@test.com', 'admin-user-id');
+        await expect(chat.removeUser(anotherUser.id, regularUser.id)).rejects.toThrow(
+          'Only administrators can remove users'
         );
-        const anotherUser = await chat.addUser(
-          'another@test.com',
-          'admin-user-id'
-        );
-        await expect(
-          chat.removeUser(anotherUser.id, regularUser.id)
-        ).rejects.toThrow('Only administrators can remove users');
       });
 
       it('should throw error when user to remove does not exist', async () => {
-        await expect(
-          chat.removeUser('nonexistent', 'admin-user-id')
-        ).rejects.toThrow('User not found');
+        await expect(chat.removeUser('nonexistent', 'admin-user-id')).rejects.toThrow(
+          'User not found'
+        );
       });
 
       it('should throw error when requester does not exist', async () => {
         const user = await chat.addUser('target@test.com', 'admin-user-id');
-        await expect(
-          chat.removeUser(user.id, 'nonexistent')
-        ).rejects.toThrow('Requester not found');
+        await expect(chat.removeUser(user.id, 'nonexistent')).rejects.toThrow(
+          'Requester not found'
+        );
       });
 
       it('should throw error when removing last admin', async () => {
-        await expect(
-          chat.removeUser('admin-user-id', 'admin-user-id')
-        ).rejects.toThrow('Cannot remove the last administrator');
+        await expect(chat.removeUser('admin-user-id', 'admin-user-id')).rejects.toThrow(
+          'Cannot remove the last administrator'
+        );
       });
 
       it('should allow removing admin when another admin exists', async () => {
-        const secondAdmin = await chat.addUser(
-          'admin2@test.com',
-          'admin-user-id',
-          true
-        );
+        const secondAdmin = await chat.addUser('admin2@test.com', 'admin-user-id', true);
         await chat.removeUser('admin-user-id', secondAdmin.id);
         const removed = await chat.getUserById('admin-user-id');
         expect(removed).toBeNull();
@@ -176,6 +164,50 @@ describe('MikroChat', () => {
       });
     });
 
+    describe('updateUserRole', () => {
+      it('should promote a user to admin', async () => {
+        const user = await chat.addUser('promote@test.com', 'admin-user-id');
+        const updated = await chat.updateUserRole(user.id, 'admin-user-id', true);
+        expect(updated.isAdmin).toBe(true);
+      });
+
+      it('should demote an admin when another admin remains', async () => {
+        const secondAdmin = await chat.addUser('admin2@test.com', 'admin-user-id', true);
+        const updated = await chat.updateUserRole(secondAdmin.id, 'admin-user-id', false);
+        expect(updated.isAdmin).toBe(false);
+      });
+
+      it('should not demote the last administrator', async () => {
+        await expect(chat.updateUserRole('admin-user-id', 'admin-user-id', false)).rejects.toThrow(
+          'Cannot remove the last administrator'
+        );
+      });
+
+      it('should throw error when non-admin tries to update roles', async () => {
+        const regularUser = await chat.addUser('regular@test.com', 'admin-user-id');
+        const targetUser = await chat.addUser('target@test.com', 'admin-user-id');
+        await expect(chat.updateUserRole(targetUser.id, regularUser.id, true)).rejects.toThrow(
+          'Only administrators can update user roles'
+        );
+      });
+
+      it('should emit UPDATE_USER event when a role changes', async () => {
+        const events: ServerSentEvent[] = [];
+        chat.subscribeToEvents((event) => events.push(event));
+
+        const user = await chat.addUser('eventrole@test.com', 'admin-user-id');
+        await chat.updateUserRole(user.id, 'admin-user-id', true);
+
+        const updateEvent = events.find((e) => e.type === 'UPDATE_USER');
+        expect(updateEvent).toBeDefined();
+        expect(updateEvent?.payload).toMatchObject({
+          id: user.id,
+          userName: user.userName,
+          isAdmin: true
+        });
+      });
+    });
+
     describe('exitUser', () => {
       it('should allow user to exit (self-remove)', async () => {
         const user = await chat.addUser('exiting@test.com', 'admin-user-id');
@@ -185,9 +217,7 @@ describe('MikroChat', () => {
       });
 
       it('should throw error for non-existent user', async () => {
-        await expect(chat.exitUser('nonexistent')).rejects.toThrow(
-          'User not found'
-        );
+        await expect(chat.exitUser('nonexistent')).rejects.toThrow('User not found');
       });
 
       it('should emit USER_EXIT event', async () => {
@@ -227,9 +257,7 @@ describe('MikroChat', () => {
 
       it('should throw error for empty name', async () => {
         const user = await chat.addUser('empty@test.com', 'admin-user-id');
-        await expect(chat.updateUserName(user.id, '')).rejects.toThrow(
-          'User name cannot be empty'
-        );
+        await expect(chat.updateUserName(user.id, '')).rejects.toThrow('User name cannot be empty');
       });
 
       it('should throw error for whitespace-only name', async () => {
@@ -240,9 +268,9 @@ describe('MikroChat', () => {
       });
 
       it('should throw error for non-existent user', async () => {
-        await expect(
-          chat.updateUserName('nonexistent', 'new-name')
-        ).rejects.toThrow('User not found');
+        await expect(chat.updateUserName('nonexistent', 'new-name')).rejects.toThrow(
+          'User not found'
+        );
       });
 
       it('should throw error when username is already taken', async () => {
@@ -250,9 +278,9 @@ describe('MikroChat', () => {
         const user2 = await chat.addUser('taken2@test.com', 'admin-user-id');
         await chat.updateUserName(user1.id, 'taken-name');
 
-        await expect(
-          chat.updateUserName(user2.id, 'taken-name')
-        ).rejects.toThrow('User name is already taken');
+        await expect(chat.updateUserName(user2.id, 'taken-name')).rejects.toThrow(
+          'User name is already taken'
+        );
       });
 
       it('should allow a user to keep their own name', async () => {
@@ -282,10 +310,7 @@ describe('MikroChat', () => {
   describe('Channel Management', () => {
     describe('createChannel', () => {
       it('should create a new channel', async () => {
-        const channel = await chat.createChannel(
-          'test-channel',
-          'admin-user-id'
-        );
+        const channel = await chat.createChannel('test-channel', 'admin-user-id');
         expect(channel).toBeDefined();
         expect(channel.name).toBe('test-channel');
         expect(channel.createdBy).toBe('admin-user-id');
@@ -293,9 +318,9 @@ describe('MikroChat', () => {
 
       it('should throw error for duplicate channel name', async () => {
         await chat.createChannel('duplicate', 'admin-user-id');
-        await expect(
-          chat.createChannel('duplicate', 'admin-user-id')
-        ).rejects.toThrow('Channel with name "duplicate" already exists');
+        await expect(chat.createChannel('duplicate', 'admin-user-id')).rejects.toThrow(
+          'Channel with name "duplicate" already exists'
+        );
       });
 
       it('should emit NEW_CHANNEL event', async () => {
@@ -315,22 +340,14 @@ describe('MikroChat', () => {
     describe('updateChannel', () => {
       it('should update channel name', async () => {
         const channel = await chat.createChannel('old-name', 'admin-user-id');
-        const updated = await chat.updateChannel(
-          channel.id,
-          'new-name',
-          'admin-user-id'
-        );
+        const updated = await chat.updateChannel(channel.id, 'new-name', 'admin-user-id');
         expect(updated.name).toBe('new-name');
       });
 
       it('should allow admin to update any channel', async () => {
         const user = await chat.addUser('creator@test.com', 'admin-user-id');
         const channel = await chat.createChannel('user-channel', user.id);
-        const updated = await chat.updateChannel(
-          channel.id,
-          'admin-renamed',
-          'admin-user-id'
-        );
+        const updated = await chat.updateChannel(channel.id, 'admin-renamed', 'admin-user-id');
         expect(updated.name).toBe('admin-renamed');
       });
 
@@ -339,9 +356,9 @@ describe('MikroChat', () => {
         const other = await chat.addUser('other@test.com', 'admin-user-id');
         const channel = await chat.createChannel('protected', creator.id);
 
-        await expect(
-          chat.updateChannel(channel.id, 'hacked', other.id)
-        ).rejects.toThrow('You can only edit channels you created');
+        await expect(chat.updateChannel(channel.id, 'hacked', other.id)).rejects.toThrow(
+          'You can only edit channels you created'
+        );
       });
 
       it('should throw error for non-existent channel', async () => {
@@ -352,9 +369,9 @@ describe('MikroChat', () => {
 
       it('should throw error for non-existent user', async () => {
         const channel = await chat.createChannel('ch-test', 'admin-user-id');
-        await expect(
-          chat.updateChannel(channel.id, 'new-name', 'nonexistent')
-        ).rejects.toThrow('User not found');
+        await expect(chat.updateChannel(channel.id, 'new-name', 'nonexistent')).rejects.toThrow(
+          'User not found'
+        );
       });
 
       it('should not allow renaming the General channel', async () => {
@@ -373,9 +390,9 @@ describe('MikroChat', () => {
         const channel1 = await chat.createChannel('channel-1', 'admin-user-id');
         await chat.createChannel('channel-2', 'admin-user-id');
 
-        await expect(
-          chat.updateChannel(channel1.id, 'channel-2', 'admin-user-id')
-        ).rejects.toThrow('Channel with name "channel-2" already exists');
+        await expect(chat.updateChannel(channel1.id, 'channel-2', 'admin-user-id')).rejects.toThrow(
+          'Channel with name "channel-2" already exists'
+        );
       });
 
       it('should emit UPDATE_CHANNEL event', async () => {
@@ -399,10 +416,7 @@ describe('MikroChat', () => {
       });
 
       it('should delete all messages in the channel', async () => {
-        const channel = await chat.createChannel(
-          'with-messages',
-          'admin-user-id'
-        );
+        const channel = await chat.createChannel('with-messages', 'admin-user-id');
         await chat.createMessage('msg1', 'admin-user-id', channel.id);
         await chat.createMessage('msg2', 'admin-user-id', channel.id);
 
@@ -413,16 +427,16 @@ describe('MikroChat', () => {
       });
 
       it('should throw error for non-existent channel', async () => {
-        await expect(
-          chat.deleteChannel('nonexistent', 'admin-user-id')
-        ).rejects.toThrow('Channel not found');
+        await expect(chat.deleteChannel('nonexistent', 'admin-user-id')).rejects.toThrow(
+          'Channel not found'
+        );
       });
 
       it('should throw error for non-existent user', async () => {
         const channel = await chat.createChannel('del-test', 'admin-user-id');
-        await expect(
-          chat.deleteChannel(channel.id, 'nonexistent')
-        ).rejects.toThrow('User not found');
+        await expect(chat.deleteChannel(channel.id, 'nonexistent')).rejects.toThrow(
+          'User not found'
+        );
       });
 
       it('should not allow deleting the General channel', async () => {
@@ -432,9 +446,9 @@ describe('MikroChat', () => {
         const generalChannelId = general?.id;
 
         if (generalChannelId)
-          await expect(
-            chat.deleteChannel(generalChannelId, 'admin-user-id')
-          ).rejects.toThrow('The General channel cannot be deleted');
+          await expect(chat.deleteChannel(generalChannelId, 'admin-user-id')).rejects.toThrow(
+            'The General channel cannot be deleted'
+          );
       });
 
       it('should throw error when non-creator/non-admin tries to delete', async () => {
@@ -473,20 +487,13 @@ describe('MikroChat', () => {
     let testChannelId: string;
 
     beforeEach(async () => {
-      const channel = await chat.createChannel(
-        'test-messages',
-        'admin-user-id'
-      );
+      const channel = await chat.createChannel('test-messages', 'admin-user-id');
       testChannelId = channel.id;
     });
 
     describe('createMessage', () => {
       it('should create a message', async () => {
-        const message = await chat.createMessage(
-          'Hello, world!',
-          'admin-user-id',
-          testChannelId
-        );
+        const message = await chat.createMessage('Hello, world!', 'admin-user-id', testChannelId);
         expect(message).toBeDefined();
         expect(message.content).toBe('Hello, world!');
         expect(message.author.id).toBe('admin-user-id');
@@ -494,36 +501,30 @@ describe('MikroChat', () => {
       });
 
       it('should create message with images', async () => {
-        const message = await chat.createMessage(
-          'With images',
-          'admin-user-id',
-          testChannelId,
-          ['img1.jpg', 'img2.png']
-        );
+        const message = await chat.createMessage('With images', 'admin-user-id', testChannelId, [
+          'img1.jpg',
+          'img2.png'
+        ]);
         expect(message.images).toEqual(['img1.jpg', 'img2.png']);
       });
 
       it('should throw error for non-existent author', async () => {
-        await expect(
-          chat.createMessage('test', 'nonexistent', testChannelId)
-        ).rejects.toThrow('Author not found');
+        await expect(chat.createMessage('test', 'nonexistent', testChannelId)).rejects.toThrow(
+          'Author not found'
+        );
       });
 
       it('should throw error for non-existent channel', async () => {
-        await expect(
-          chat.createMessage('test', 'admin-user-id', 'nonexistent')
-        ).rejects.toThrow('Channel not found');
+        await expect(chat.createMessage('test', 'admin-user-id', 'nonexistent')).rejects.toThrow(
+          'Channel not found'
+        );
       });
 
       it('should emit NEW_MESSAGE event', async () => {
         const events: ServerSentEvent[] = [];
         chat.subscribeToEvents((event) => events.push(event));
 
-        await chat.createMessage(
-          'event message',
-          'admin-user-id',
-          testChannelId
-        );
+        await chat.createMessage('event message', 'admin-user-id', testChannelId);
 
         const newMsgEvent = events.find((e) => e.type === 'NEW_MESSAGE');
         expect(newMsgEvent).toBeDefined();
@@ -538,10 +539,7 @@ describe('MikroChat', () => {
         const limitedChat = new MikroChat(limitedConfig, limitedDb);
         await new Promise((resolve) => setTimeout(resolve, 10));
 
-        const channel = await limitedChat.createChannel(
-          'limited',
-          'admin-user-id'
-        );
+        const channel = await limitedChat.createChannel('limited', 'admin-user-id');
 
         await limitedChat.createMessage('msg1', 'admin-user-id', channel.id);
         await limitedChat.createMessage('msg2', 'admin-user-id', channel.id);
@@ -555,11 +553,7 @@ describe('MikroChat', () => {
 
     describe('updateMessage', () => {
       it('should update message content', async () => {
-        const message = await chat.createMessage(
-          'original',
-          'admin-user-id',
-          testChannelId
-        );
+        const message = await chat.createMessage('original', 'admin-user-id', testChannelId);
         const { message: updated } = await chat.updateMessage(
           message.id,
           'admin-user-id',
@@ -569,12 +563,11 @@ describe('MikroChat', () => {
       });
 
       it('should update message images and return removed ones', async () => {
-        const message = await chat.createMessage(
-          'with images',
-          'admin-user-id',
-          testChannelId,
-          ['a.jpg', 'b.jpg', 'c.jpg']
-        );
+        const message = await chat.createMessage('with images', 'admin-user-id', testChannelId, [
+          'a.jpg',
+          'b.jpg',
+          'c.jpg'
+        ]);
         const { message: updated, removedImages } = await chat.updateMessage(
           message.id,
           'admin-user-id',
@@ -587,32 +580,24 @@ describe('MikroChat', () => {
 
       it('should throw error when editing another users message', async () => {
         const other = await chat.addUser('other@test.com', 'admin-user-id');
-        const message = await chat.createMessage(
-          'owned',
-          'admin-user-id',
-          testChannelId
-        );
+        const message = await chat.createMessage('owned', 'admin-user-id', testChannelId);
 
-        await expect(
-          chat.updateMessage(message.id, other.id, 'hacked')
-        ).rejects.toThrow('You can only edit your own messages');
+        await expect(chat.updateMessage(message.id, other.id, 'hacked')).rejects.toThrow(
+          'You can only edit your own messages'
+        );
       });
 
       it('should throw error for non-existent message', async () => {
-        await expect(
-          chat.updateMessage('nonexistent', 'admin-user-id', 'test')
-        ).rejects.toThrow('Message not found');
+        await expect(chat.updateMessage('nonexistent', 'admin-user-id', 'test')).rejects.toThrow(
+          'Message not found'
+        );
       });
 
       it('should emit UPDATE_MESSAGE event', async () => {
         const events: ServerSentEvent[] = [];
         chat.subscribeToEvents((event) => events.push(event));
 
-        const message = await chat.createMessage(
-          'original',
-          'admin-user-id',
-          testChannelId
-        );
+        const message = await chat.createMessage('original', 'admin-user-id', testChannelId);
         await chat.updateMessage(message.id, 'admin-user-id', 'updated');
 
         const updateEvent = events.find((e) => e.type === 'UPDATE_MESSAGE');
@@ -622,11 +607,7 @@ describe('MikroChat', () => {
 
     describe('deleteMessage', () => {
       it('should delete own message', async () => {
-        const message = await chat.createMessage(
-          'to delete',
-          'admin-user-id',
-          testChannelId
-        );
+        const message = await chat.createMessage('to delete', 'admin-user-id', testChannelId);
         await chat.deleteMessage(message.id, 'admin-user-id');
         const deleted = await chat.getMessageById(message.id);
         expect(deleted).toBeNull();
@@ -634,41 +615,29 @@ describe('MikroChat', () => {
 
       it('should allow admin to delete any message', async () => {
         const user = await chat.addUser('user@test.com', 'admin-user-id');
-        const message = await chat.createMessage(
-          'user message',
-          user.id,
-          testChannelId
-        );
+        const message = await chat.createMessage('user message', user.id, testChannelId);
         await chat.deleteMessage(message.id, 'admin-user-id');
         const deleted = await chat.getMessageById(message.id);
         expect(deleted).toBeNull();
       });
 
       it('should throw error for non-existent message', async () => {
-        await expect(
-          chat.deleteMessage('nonexistent', 'admin-user-id')
-        ).rejects.toThrow('Message not found');
+        await expect(chat.deleteMessage('nonexistent', 'admin-user-id')).rejects.toThrow(
+          'Message not found'
+        );
       });
 
       it('should throw error for non-existent user', async () => {
-        const message = await chat.createMessage(
-          'test',
-          'admin-user-id',
-          testChannelId
+        const message = await chat.createMessage('test', 'admin-user-id', testChannelId);
+        await expect(chat.deleteMessage(message.id, 'nonexistent')).rejects.toThrow(
+          'User not found'
         );
-        await expect(
-          chat.deleteMessage(message.id, 'nonexistent')
-        ).rejects.toThrow('User not found');
       });
 
       it('should throw error when non-author/non-admin tries to delete', async () => {
         const user1 = await chat.addUser('user1@test.com', 'admin-user-id');
         const user2 = await chat.addUser('user2@test.com', 'admin-user-id');
-        const message = await chat.createMessage(
-          'protected',
-          user1.id,
-          testChannelId
-        );
+        const message = await chat.createMessage('protected', user1.id, testChannelId);
 
         await expect(chat.deleteMessage(message.id, user2.id)).rejects.toThrow(
           'You can only delete your own messages'
@@ -679,11 +648,7 @@ describe('MikroChat', () => {
         const events: ServerSentEvent[] = [];
         chat.subscribeToEvents((event) => events.push(event));
 
-        const message = await chat.createMessage(
-          'to delete',
-          'admin-user-id',
-          testChannelId
-        );
+        const message = await chat.createMessage('to delete', 'admin-user-id', testChannelId);
         await chat.deleteMessage(message.id, 'admin-user-id');
 
         const deleteEvent = events.find((e) => e.type === 'DELETE_MESSAGE');
@@ -712,11 +677,7 @@ describe('MikroChat', () => {
       });
 
       it('should not include thread replies in channel messages', async () => {
-        const msg = await chat.createMessage(
-          'parent',
-          'admin-user-id',
-          testChannelId
-        );
+        const msg = await chat.createMessage('parent', 'admin-user-id', testChannelId);
         await chat.createThreadReply('reply', 'admin-user-id', msg.id);
 
         const messages = await chat.getMessagesByChannel(testChannelId);
@@ -730,39 +691,28 @@ describe('MikroChat', () => {
     let testMessageId: string;
 
     beforeEach(async () => {
-      const channel = await chat.createChannel(
-        'reactions-test',
-        'admin-user-id'
-      );
+      const channel = await chat.createChannel('reactions-test', 'admin-user-id');
       testChannelId = channel.id;
-      const message = await chat.createMessage(
-        'react to me',
-        'admin-user-id',
-        testChannelId
-      );
+      const message = await chat.createMessage('react to me', 'admin-user-id', testChannelId);
       testMessageId = message.id;
     });
 
     describe('addReaction', () => {
       it('should add a reaction to a message', async () => {
-        const updated = await chat.addReaction(
-          testMessageId,
-          'admin-user-id',
-          '👍'
-        );
+        const updated = await chat.addReaction(testMessageId, 'admin-user-id', '👍');
         expect(updated.reactions['admin-user-id']).toContain('👍');
       });
 
       it('should throw error for non-existent user', async () => {
-        await expect(
-          chat.addReaction(testMessageId, 'nonexistent', '👍')
-        ).rejects.toThrow('User not found');
+        await expect(chat.addReaction(testMessageId, 'nonexistent', '👍')).rejects.toThrow(
+          'User not found'
+        );
       });
 
       it('should throw error for non-existent message', async () => {
-        await expect(
-          chat.addReaction('nonexistent', 'admin-user-id', '👍')
-        ).rejects.toThrow('Message not found');
+        await expect(chat.addReaction('nonexistent', 'admin-user-id', '👍')).rejects.toThrow(
+          'Message not found'
+        );
       });
 
       it('should emit NEW_REACTION event', async () => {
@@ -779,29 +729,39 @@ describe('MikroChat', () => {
           reaction: '🎉'
         });
       });
+
+      it('should not emit duplicate reaction events for the same user and emoji', async () => {
+        const events: ServerSentEvent[] = [];
+        chat.subscribeToEvents((event) => events.push(event));
+
+        await chat.addReaction(testMessageId, 'admin-user-id', '🙏');
+        await chat.addReaction(testMessageId, 'admin-user-id', '🙏');
+
+        const reactionEvents = events.filter((event) => event.type === 'NEW_REACTION');
+        const updated = await chat.getMessageById(testMessageId);
+
+        expect(reactionEvents).toHaveLength(1);
+        expect(updated?.reactions['admin-user-id']).toEqual(['🙏']);
+      });
     });
 
     describe('removeReaction', () => {
       it('should remove a reaction from a message', async () => {
         await chat.addReaction(testMessageId, 'admin-user-id', '👍');
-        const updated = await chat.removeReaction(
-          testMessageId,
-          'admin-user-id',
-          '👍'
-        );
+        const updated = await chat.removeReaction(testMessageId, 'admin-user-id', '👍');
         expect(updated.reactions['admin-user-id'] || []).not.toContain('👍');
       });
 
       it('should throw error for non-existent user', async () => {
-        await expect(
-          chat.removeReaction(testMessageId, 'nonexistent', '👍')
-        ).rejects.toThrow('User not found');
+        await expect(chat.removeReaction(testMessageId, 'nonexistent', '👍')).rejects.toThrow(
+          'User not found'
+        );
       });
 
       it('should throw error for non-existent message', async () => {
-        await expect(
-          chat.removeReaction('nonexistent', 'admin-user-id', '👍')
-        ).rejects.toThrow('Message not found');
+        await expect(chat.removeReaction('nonexistent', 'admin-user-id', '👍')).rejects.toThrow(
+          'Message not found'
+        );
       });
 
       it('should emit DELETE_REACTION event', async () => {
@@ -813,6 +773,19 @@ describe('MikroChat', () => {
 
         const deleteEvent = events.find((e) => e.type === 'DELETE_REACTION');
         expect(deleteEvent).toBeDefined();
+      });
+
+      it('should not emit duplicate delete events when the reaction is already gone', async () => {
+        const events: ServerSentEvent[] = [];
+        chat.subscribeToEvents((event) => events.push(event));
+
+        await chat.addReaction(testMessageId, 'admin-user-id', '🙏');
+        await chat.removeReaction(testMessageId, 'admin-user-id', '🙏');
+        await chat.removeReaction(testMessageId, 'admin-user-id', '🙏');
+
+        const deleteEvents = events.filter((event) => event.type === 'DELETE_REACTION');
+
+        expect(deleteEvents).toHaveLength(1);
       });
     });
   });
@@ -836,9 +809,9 @@ describe('MikroChat', () => {
       });
 
       it('should throw error for non-existent user', async () => {
-        await expect(
-          chat.setUserPassword('nonexistent', 'securepass123')
-        ).rejects.toThrow('User not found');
+        await expect(chat.setUserPassword('nonexistent', 'securepass123')).rejects.toThrow(
+          'User not found'
+        );
       });
 
       it('should produce different hashes for the same password (unique salt)', async () => {
@@ -859,10 +832,7 @@ describe('MikroChat', () => {
         const user = await chat.addUser('verify@test.com', 'admin-user-id');
         await chat.setUserPassword(user.id, 'correctpass');
 
-        const result = await chat.verifyUserPassword(
-          'verify@test.com',
-          'correctpass'
-        );
+        const result = await chat.verifyUserPassword('verify@test.com', 'correctpass');
         expect(result.id).toBe(user.id);
         expect(result.email).toBe('verify@test.com');
       });
@@ -871,23 +841,23 @@ describe('MikroChat', () => {
         const user = await chat.addUser('wrong@test.com', 'admin-user-id');
         await chat.setUserPassword(user.id, 'correctpass');
 
-        await expect(
-          chat.verifyUserPassword('wrong@test.com', 'wrongpass')
-        ).rejects.toThrow('Invalid credentials');
+        await expect(chat.verifyUserPassword('wrong@test.com', 'wrongpass')).rejects.toThrow(
+          'Invalid credentials'
+        );
       });
 
       it('should reject when user has no password set', async () => {
         await chat.addUser('nopw@test.com', 'admin-user-id');
 
-        await expect(
-          chat.verifyUserPassword('nopw@test.com', 'anypass')
-        ).rejects.toThrow('Invalid credentials');
+        await expect(chat.verifyUserPassword('nopw@test.com', 'anypass')).rejects.toThrow(
+          'Invalid credentials'
+        );
       });
 
       it('should reject when user does not exist', async () => {
-        await expect(
-          chat.verifyUserPassword('nobody@test.com', 'anypass')
-        ).rejects.toThrow('Invalid credentials');
+        await expect(chat.verifyUserPassword('nobody@test.com', 'anypass')).rejects.toThrow(
+          'Invalid credentials'
+        );
       });
     });
 
@@ -897,20 +867,14 @@ describe('MikroChat', () => {
         await chat.setUserPassword(user.id, 'oldpassword123');
 
         // Verify old password works
-        const result = await chat.verifyUserPassword(
-          'reset@test.com',
-          'oldpassword123'
-        );
+        const result = await chat.verifyUserPassword('reset@test.com', 'oldpassword123');
         expect(result.email).toBe('reset@test.com');
 
         // Overwrite with new password
         await chat.setUserPassword(user.id, 'newpassword456');
 
         // New password should work
-        const result2 = await chat.verifyUserPassword(
-          'reset@test.com',
-          'newpassword456'
-        );
+        const result2 = await chat.verifyUserPassword('reset@test.com', 'newpassword456');
         expect(result2.email).toBe('reset@test.com');
       });
 
@@ -940,10 +904,7 @@ describe('MikroChat', () => {
         expect(hash1).not.toBe(hash2);
 
         // But both should still verify
-        const result = await chat.verifyUserPassword(
-          'resame@test.com',
-          'samepassword'
-        );
+        const result = await chat.verifyUserPassword('resame@test.com', 'samepassword');
         expect(result.email).toBe('resame@test.com');
       });
     });
@@ -1000,11 +961,113 @@ describe('MikroChat', () => {
 
       await chat.updateServerSettings({ name: 'Event Test' });
 
-      const settingsEvent = events.find(
-        (e) => e.type === 'UPDATE_SERVER_SETTINGS'
-      );
+      const settingsEvent = events.find((e) => e.type === 'UPDATE_SERVER_SETTINGS');
       expect(settingsEvent).toBeDefined();
       expect(settingsEvent?.payload).toMatchObject({ name: 'Event Test' });
+    });
+  });
+
+  describe('Replacement-grade collaboration features', () => {
+    it('should hide private channels from non-members', async () => {
+      const member = await chat.addUser('member@test.com', 'admin-user-id');
+      const outsider = await chat.addUser('outsider@test.com', 'admin-user-id');
+
+      const privateChannel = await chat.createChannel('private-room', 'admin-user-id', {
+        isPrivate: true,
+        members: [member.id]
+      });
+
+      const memberChannels = await chat.listChannelsForUser(member.id);
+      const outsiderChannels = await chat.listChannelsForUser(outsider.id);
+
+      expect(memberChannels.some((channel) => channel.id === privateChannel.id)).toBe(true);
+      expect(outsiderChannels.some((channel) => channel.id === privateChannel.id)).toBe(false);
+      await expect(chat.createMessage('nope', outsider.id, privateChannel.id)).rejects.toThrow(
+        'You do not have access to this channel'
+      );
+    });
+
+    it('should search only visible messages', async () => {
+      const member = await chat.addUser('searcher@test.com', 'admin-user-id');
+      const outsider = await chat.addUser('searchout@test.com', 'admin-user-id');
+      const publicChannel = await chat.createChannel('public-search', 'admin-user-id');
+      const privateChannel = await chat.createChannel('private-search', 'admin-user-id', {
+        isPrivate: true,
+        members: [member.id]
+      });
+
+      await chat.createMessage('visible needle', 'admin-user-id', publicChannel.id);
+      await chat.createMessage('hidden needle', 'admin-user-id', privateChannel.id);
+
+      const memberResults = await chat.searchMessages(member.id, 'needle');
+      const outsiderResults = await chat.searchMessages(outsider.id, 'needle');
+
+      expect(memberResults.map((message) => message.content)).toContain('hidden needle');
+      expect(outsiderResults.map((message) => message.content)).not.toContain('hidden needle');
+    });
+
+    it('should pin and unpin channel messages', async () => {
+      const channel = await chat.createChannel('pins', 'admin-user-id');
+      const message = await chat.createMessage('important', 'admin-user-id', channel.id);
+
+      await chat.pinMessage(message.id, 'admin-user-id');
+      let pins = await chat.listPinnedMessages(channel.id, 'admin-user-id');
+      expect(pins.map((pin) => pin.id)).toContain(message.id);
+
+      await chat.unpinMessage(message.id, 'admin-user-id');
+      pins = await chat.listPinnedMessages(channel.id, 'admin-user-id');
+      expect(pins.map((pin) => pin.id)).not.toContain(message.id);
+    });
+
+    it('should track mentions and generic attachments', async () => {
+      const mentioned = await chat.addUser('mention@test.com', 'admin-user-id');
+      await chat.updateUserName(mentioned.id, 'mentionable');
+      const channel = await chat.createChannel('mentions', 'admin-user-id');
+
+      const message = await chat.createMessage('hello @mentionable', 'admin-user-id', channel.id, {
+        attachments: [
+          {
+            filename: 'report.pdf',
+            originalName: 'report.pdf',
+            contentType: 'application/pdf',
+            size: 128
+          }
+        ]
+      });
+
+      expect(message.mentions).toContain(mentioned.id);
+      expect(message.attachments?.[0].originalName).toBe('report.pdf');
+    });
+
+    it('should expose audit log, export data, and presence', async () => {
+      const channel = await chat.createChannel('audited', 'admin-user-id');
+      await chat.updateChannel(channel.id, 'audited-renamed', 'admin-user-id');
+      const auditedUser = await chat.addUser('audited-user@test.com', 'admin-user-id');
+      await chat.updateUserRole(auditedUser.id, 'admin-user-id', true);
+
+      const auditLog = await chat.listAuditLog('admin-user-id');
+      expect(auditLog.some((entry) => entry.action === 'user.create')).toBe(true);
+      expect(auditLog.some((entry) => entry.action === 'user.role.update')).toBe(true);
+      expect(auditLog.some((entry) => entry.action === 'channel.create')).toBe(false);
+      expect(auditLog.some((entry) => entry.action === 'channel.update')).toBe(false);
+
+      const auditPage = await chat.queryAuditLog('admin-user-id', {
+        category: 'user',
+        limit: 1
+      });
+      expect(auditPage.actions).toContain('user');
+      expect(auditPage.actions).not.toContain('channel.create');
+      expect(auditPage.entries).toHaveLength(1);
+      expect(auditPage.entries[0].targetType).toBe('user');
+      expect(auditPage.limit).toBe(1);
+      expect(auditPage.total).toBeGreaterThanOrEqual(1);
+
+      const exported = await chat.exportData('admin-user-id');
+      expect(exported.channels.some((item) => item.name === 'audited-renamed')).toBe(true);
+
+      const presence = await chat.setUserPresence('admin-user-id', 'online');
+      expect(presence.status).toBe('online');
+      expect(chat.getPresence()).toContainEqual(presence);
     });
   });
 

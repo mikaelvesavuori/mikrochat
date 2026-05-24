@@ -1,0 +1,1512 @@
+---
+title: API Reference
+description: Complete HTTP API reference for the MikroChat server.
+---
+
+All API endpoints require authentication via a Bearer token, unless noted otherwise.
+
+```bash
+Authorization: Bearer <your-jwt-token>
+```
+
+## Base URL
+
+Default: `http://127.0.0.1:3000`
+
+## Health
+
+### `GET /health`
+
+Health check endpoint. No authentication required.
+
+**Response:** `200 OK`
+
+```text
+OK
+```
+
+## Authentication
+
+### `GET /config.json`
+
+Returns safe, public runtime auth capabilities used by the web app. No authentication required.
+
+`GET /auth/config` remains available as a compatibility alias.
+
+**Response:** `200 OK`
+
+```json
+{
+  "auth": {
+    "mode": "magic-link",
+    "hasEmail": true,
+    "isInviteRequired": true,
+    "oauthEnabled": false,
+    "passwordResetEnabled": false,
+    "registrationEnabled": false
+  }
+}
+```
+
+### `POST /auth/dev-login`
+
+Local mode login. Only available when `auth.authMode` is `"dev"`.
+
+**Request:**
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "user": {
+    "id": "abc123",
+    "userName": "user",
+    "email": "user@example.com",
+    "isAdmin": false
+  },
+  "token": "eyJhbG..."
+}
+```
+
+### `POST /auth/login`
+
+Request a magic link. Sends an email with a login link. Only available when `auth.authMode` is `"magic-link"`.
+
+**Request:**
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "If a matching account was found, a magic link has been sent."
+}
+```
+
+### `POST /auth/verify`
+
+Verify a magic link token and create a session. Only available when `auth.authMode` is `"magic-link"`. The token is passed via the `Authorization: Bearer <token>` header.
+
+**Request:**
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "accessToken": "eyJhbG...",
+  "refreshToken": "eyJhbG..."
+}
+```
+
+### `POST /auth/password-login`
+
+Sign in with email and password. Only available when `auth.authMode` is `"password"`.
+
+**Request:**
+
+```json
+{
+  "email": "user@example.com",
+  "password": "your-password"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "accessToken": "eyJhbG...",
+  "refreshToken": "eyJhbG...",
+  "exp": 900,
+  "tokenType": "Bearer"
+}
+```
+
+**Errors:**
+
+- `401 Unauthorized` - Invalid credentials
+
+### `POST /auth/request-password-reset`
+
+Request a password reset email. Only available when `auth.authMode` is `"password"`. Always returns success to prevent email enumeration.
+
+**Request:**
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "If a matching account was found, a password reset link has been sent."
+}
+```
+
+### `POST /auth/setup-password`
+
+Set a password after clicking an invite or password reset link. Only available when `auth.authMode` is `"password"`. The token can be passed in the request body or via the `Authorization: Bearer <token>` header.
+
+**Request:**
+
+```json
+{
+  "email": "user@example.com",
+  "token": "invite-link-token",
+  "password": "your-new-password"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "accessToken": "eyJhbG...",
+  "refreshToken": "eyJhbG...",
+  "exp": 900,
+  "tokenType": "Bearer"
+}
+```
+
+**Errors:**
+
+- `400 Bad Request` - Invalid token or password too short (minimum 8 characters)
+
+### `POST /auth/register`
+
+Self-register with email and password. Only available when `auth.authMode` is `"password"` and `isInviteRequired` is `false`.
+
+**Request:**
+
+```json
+{
+  "email": "user@example.com",
+  "password": "your-password"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "accessToken": "eyJhbG...",
+  "refreshToken": "eyJhbG...",
+  "exp": 900,
+  "tokenType": "Bearer"
+}
+```
+
+**Errors:**
+
+- `400 Bad Request` - User already exists or password too short
+
+### `GET /auth/oauth/providers`
+
+List available OAuth providers. Only present when OAuth is configured. No authentication required.
+
+**Response:** `200 OK`
+
+```json
+{
+  "providers": [
+    {
+      "id": "google",
+      "name": "Google",
+      "loginUrl": "/auth/oauth/google"
+    }
+  ],
+  "count": 1
+}
+```
+
+### `GET /auth/oauth/:providerId`
+
+Initiate an OAuth flow. Redirects the browser to the provider's authorization page. No authentication required.
+
+**Response:** `302 Found` (redirect to OAuth provider)
+
+**Errors:**
+
+- `429 Too Many Requests` - Rate limit exceeded
+
+### `GET /auth/oauth/:providerId/callback`
+
+OAuth callback handler. Called by the provider after user authentication. Validates the CSRF state, exchanges the authorization code for tokens, and redirects the user back to the application with tokens as query parameters. No authentication required.
+
+**Query parameters (set by the OAuth provider):**
+
+- `code` - Authorization code
+- `state` - CSRF state token
+
+**Response:** `302 Found` (redirect to application URL with `access_token`, `refresh_token`, and `expires_in` query parameters)
+
+**Errors (redirected as query parameter `oauth_error`):**
+
+- Missing or invalid state/code
+- User not found and invites are required
+- Rate limit exceeded
+
+### `POST /auth/refresh`
+
+Refresh an expired access token.
+
+**Request:**
+
+```json
+{
+  "refreshToken": "eyJhbG..."
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "accessToken": "eyJhbG...",
+  "refreshToken": "eyJhbG..."
+}
+```
+
+### `POST /auth/logout`
+
+End the current session.
+
+**Request:**
+
+```json
+{
+  "refreshToken": "eyJhbG..."
+}
+```
+
+**Response:** `200 OK`
+
+### `GET /auth/me`
+
+Get the current authenticated user.
+
+**Response:** `200 OK`
+
+```json
+{
+  "user": {
+    "id": "abc123",
+    "userName": "user",
+    "email": "user@example.com",
+    "isAdmin": false
+  }
+}
+```
+
+### `GET /auth/sessions`
+
+List active sessions for the current user.
+
+**Response:** `200 OK`
+
+### `DELETE /auth/sessions`
+
+Revoke sessions for the current user.
+
+**Response:** `200 OK`
+
+## Users
+
+### `GET /users`
+
+List all users.
+
+**Response:** `200 OK`
+
+```json
+{
+  "users": [
+    {
+      "id": "user456",
+      "userName": "user",
+      "email": "user@example.com",
+      "isAdmin": false,
+      "createdAt": 1706234567890
+    }
+  ]
+}
+```
+
+### `POST /users/add`
+
+Add a new user. Requires admin.
+
+**Request:**
+
+```json
+{
+  "email": "newuser@example.com",
+  "role": "user",
+  "password": "optional-initial-password"
+}
+```
+
+Set `role` to `"admin"` to create an admin user (requires the requesting user to be an admin).
+
+The `password` field is optional. When provided in password auth mode, the user's password is set immediately. When omitted and email is configured, an invite email with a setup link is sent. When omitted and email is not configured, the user is created without a password.
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "userId": "user789"
+}
+```
+
+### `POST /users/:id/reset-password`
+
+Reset a user's password. Requires admin.
+
+**Request:**
+
+```json
+{
+  "password": "new-password-min-8-chars"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true
+}
+```
+
+**Errors:**
+
+- `400 Bad Request` - Password too short (minimum 8 characters) or user not found
+- `403 Forbidden` - Non-admin user
+
+### `PUT /users/:id/role`
+
+Update a user's role. Requires admin. The last remaining admin cannot be demoted.
+
+**Request:**
+
+```json
+{
+  "role": "admin"
+}
+```
+
+Use `"role": "user"` to demote an admin.
+
+**Response:** `200 OK`
+
+```json
+{
+  "user": {
+    "id": "user456",
+    "userName": "user",
+    "email": "user@example.com",
+    "isAdmin": true,
+    "createdAt": 1706234567890
+  }
+}
+```
+
+**Errors:**
+
+- `400 Bad Request` - Invalid role, user not found, or would remove the last admin
+- `403 Forbidden` - Non-admin user
+
+### `DELETE /users/:id`
+
+Remove a user. Requires admin. Cannot remove the last admin.
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true
+}
+```
+
+### `POST /users/exit`
+
+Self-remove the current user from the server. Admins can only exit if there is at least one other admin.
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "You have exited the server"
+}
+```
+
+### `PUT /users/me`
+
+Update the current user's display name.
+
+**Request:**
+
+```json
+{
+  "userName": "New Display Name"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "user": {
+    "id": "abc123",
+    "userName": "New Display Name",
+    "email": "user@example.com",
+    "isAdmin": false
+  }
+}
+```
+
+## Channels
+
+### `GET /channels`
+
+List all channels visible to the authenticated user. Private channels are returned only to members and admins.
+
+**Response:** `200 OK`
+
+```json
+{
+  "channels": [
+    {
+      "id": "abc123",
+      "name": "general",
+      "topic": "Company-wide updates",
+      "isPrivate": false,
+      "createdAt": 1706234567890
+    },
+    {
+      "id": "def456",
+      "name": "random",
+      "createdAt": 1706234600000
+    }
+  ]
+}
+```
+
+### `POST /channels`
+
+Create a new channel.
+
+**Request:**
+
+```json
+{
+  "name": "new-channel",
+  "topic": "Optional channel topic",
+  "isPrivate": true,
+  "members": ["user123", "user456"]
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "channel": {
+    "id": "ghi789",
+    "name": "new-channel",
+    "topic": "Optional channel topic",
+    "isPrivate": true,
+    "members": ["creator-id", "user123", "user456"],
+    "createdAt": 1706234700000
+  }
+}
+```
+
+### `PUT /channels/:channelId`
+
+Update a channel. Channel creators and admins can edit channel metadata.
+
+**Request:**
+
+```json
+{
+  "name": "renamed-channel",
+  "topic": "Updated topic",
+  "isPrivate": false,
+  "members": []
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "channel": {
+    "id": "abc123",
+    "name": "renamed-channel",
+    "updatedAt": 1706234800000
+  }
+}
+```
+
+### `DELETE /channels/:channelId`
+
+Delete a channel. Channel creators and admins can delete channels. Deleting a channel also deletes all its messages and webhooks.
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true
+}
+```
+
+## Messages
+
+### `GET /channels/:channelId/messages`
+
+Get messages in a channel.
+
+**Query parameters:**
+
+- `limit` (optional): Maximum messages to return (default: 50)
+- `before` (optional): Get messages before this message ID
+
+**Response:** `200 OK`
+
+```json
+{
+  "messages": [
+    {
+      "id": "msg123",
+      "channelId": "abc123",
+      "author": {
+        "id": "user456",
+        "userName": "user"
+      },
+      "content": "Hello, world!",
+      "attachments": [],
+      "quotedMessageId": null,
+      "mentions": [],
+      "pinnedAt": null,
+      "createdAt": 1706234567890,
+      "updatedAt": null,
+      "reactions": {
+        "👍": ["user456", "user789"]
+      }
+    }
+  ]
+}
+```
+
+### `POST /channels/:channelId/messages`
+
+Send a message to a channel.
+
+**Request:**
+
+```json
+{
+  "content": "Hello, world!",
+  "attachments": [
+    {
+      "filename": "1706234567890-file.pdf",
+      "originalName": "file.pdf",
+      "contentType": "application/pdf",
+      "size": 12345
+    }
+  ],
+  "quotedMessageId": "msg122"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "message": {
+    "id": "msg123",
+    "channelId": "abc123",
+    "author": {
+      "id": "user456",
+      "userName": "user"
+    },
+    "content": "Hello, world!",
+    "attachments": [],
+    "quotedMessageId": "msg122",
+    "mentions": [],
+    "createdAt": 1706234567890
+  }
+}
+```
+
+### `PUT /messages/:messageId`
+
+Edit a message. Users can only edit their own messages.
+
+**Request:**
+
+```json
+{
+  "content": "Updated message",
+  "attachments": [],
+  "quotedMessageId": "msg122"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "message": {
+    "id": "msg123",
+    "content": "Updated message",
+    "updatedAt": 1706234800000
+  }
+}
+```
+
+### `DELETE /messages/:messageId`
+
+Delete a message. Users can delete their own messages. Admins can delete any message.
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true
+}
+```
+
+### `GET /search/messages`
+
+Search messages visible to the authenticated user. Search includes message content, author names, and attachment filenames.
+
+**Query parameters:**
+
+- `q` (required): Search query
+- `channelId` (optional): Restrict search to a channel
+- `conversationId` (optional): Restrict search to a direct message conversation
+- `authorId` (optional): Restrict search to one author
+- `from` / `to` (optional): Unix timestamps for date filtering
+- `limit` (optional): Maximum messages to return (default: 50)
+
+**Response:** `200 OK`
+
+```json
+{
+  "messages": [
+    {
+      "id": "msg123",
+      "channelId": "abc123",
+      "content": "Search result",
+      "author": {
+        "id": "user456",
+        "userName": "user"
+      },
+      "createdAt": 1706234567890
+    }
+  ]
+}
+```
+
+### `POST /messages/:messageId/pin`
+
+Pin a channel message.
+
+**Response:** `200 OK`
+
+```json
+{
+  "message": {
+    "id": "msg123",
+    "pinnedAt": 1706234567890
+  }
+}
+```
+
+### `DELETE /messages/:messageId/pin`
+
+Unpin a channel message.
+
+**Response:** `200 OK`
+
+```json
+{
+  "message": {
+    "id": "msg123"
+  }
+}
+```
+
+### `GET /channels/:channelId/pins`
+
+List pinned messages in a channel.
+
+**Response:** `200 OK`
+
+```json
+{
+  "messages": []
+}
+```
+
+## Reactions
+
+### `POST /messages/:messageId/reactions`
+
+Add a reaction to a message.
+
+**Request:**
+
+```json
+{
+  "reaction": "👍"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "message": {
+    "id": "msg123",
+    "reactions": {
+      "👍": ["user456"]
+    }
+  }
+}
+```
+
+### `DELETE /messages/:messageId/reactions`
+
+Remove a reaction from a message.
+
+**Request:**
+
+```json
+{
+  "reaction": "👍"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "message": {
+    "id": "msg123",
+    "reactions": {}
+  }
+}
+```
+
+## File Attachments
+
+### `POST /files`
+
+Upload a generic file attachment. Files are sent as base64-encoded JSON and can then be attached to channel, DM, or thread messages via the `attachments` message field.
+
+**Request:**
+
+```json
+{
+  "filename": "roadmap.pdf",
+  "file": "<base64-encoded-file-data>",
+  "contentType": "application/pdf"
+}
+```
+
+Supported formats: PDF, TXT, Markdown, CSV, JSON, ZIP, DOC/DOCX, XLS/XLSX, PPT/PPTX. Maximum size is 25MB.
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "attachment": {
+    "filename": "1706234567890-abc123.pdf",
+    "originalName": "roadmap.pdf",
+    "contentType": "application/pdf",
+    "size": 12345
+  }
+}
+```
+
+### `GET /files/:filename`
+
+Download a file attachment. The user must have access to a message containing the file.
+
+**Response:** `200 OK`
+
+Returns the file data with the stored content type and a download filename.
+
+## Images
+
+### `POST /channels/:channelId/messages/image`
+
+Upload an image. Images are sent as base64-encoded JSON (not multipart/form-data).
+
+**Request:**
+
+```json
+{
+  "filename": "photo.jpg",
+  "image": "<base64-encoded-image-data>",
+  "thumbnail": "<base64-encoded-thumbnail>"
+}
+```
+
+- `image`: Base64-encoded image data (max 10MB, formats: JPG, PNG, WebP, SVG)
+- `thumbnail` (optional): Base64-encoded thumbnail for previews
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "filename": "1706234567890-abc123def456.jpg"
+}
+```
+
+### `GET /channels/:channelId/messages/image/:filename`
+
+Download an image.
+
+**Query parameters:**
+
+- `size` (optional): Set to `"thumb"` to get the thumbnail version
+
+**Response:** `200 OK`
+
+Returns the image data with appropriate `Content-Type` header.
+
+## Threads
+
+Threaded replies allow sub-conversations on any channel message. Thread replies are regular messages linked to a parent message.
+
+### `GET /messages/:messageId/thread`
+
+Get all replies in a thread.
+
+**Query parameters:**
+
+- `limit` (optional): Maximum replies to return (default: 50)
+- `before` (optional): Get replies before this message ID
+
+**Response:** `200 OK`
+
+```json
+{
+  "replies": [
+    {
+      "id": "reply123",
+      "threadId": "msg123",
+      "channelId": "abc123",
+      "author": {
+        "id": "user456",
+        "userName": "user"
+      },
+      "content": "Great point!",
+      "createdAt": 1706234567890
+    }
+  ]
+}
+```
+
+### `POST /messages/:messageId/thread`
+
+Create a reply in a thread. The parent message must be a top-level channel message (not itself a reply).
+
+**Request:**
+
+```json
+{
+  "content": "Great point!"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "reply": {
+    "id": "reply123",
+    "threadId": "msg123",
+    "channelId": "abc123",
+    "author": {
+      "id": "user456",
+      "userName": "user"
+    },
+    "content": "Great point!",
+    "createdAt": 1706234567890
+  },
+  "threadMeta": {
+    "replyCount": 1,
+    "lastReplyAt": 1706234567890,
+    "lastReplyBy": { "id": "user456", "userName": "user" },
+    "participants": ["user456"]
+  }
+}
+```
+
+### `PUT /messages/:messageId/thread/:replyId`
+
+Update a thread reply. Users can only edit their own replies.
+
+**Request:**
+
+```json
+{
+  "content": "Updated reply"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "message": {
+    "id": "reply123",
+    "content": "Updated reply",
+    "updatedAt": 1706234800000
+  }
+}
+```
+
+### `DELETE /messages/:messageId/thread/:replyId`
+
+Delete a thread reply. Users can delete their own replies. Admins can delete any reply. The parent message's `threadMeta` is recalculated automatically.
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true
+}
+```
+
+### `POST /messages/:messageId/thread/image`
+
+Upload an image for a thread reply. Same base64 JSON format as channel image uploads.
+
+**Request:**
+
+```json
+{
+  "filename": "photo.jpg",
+  "image": "<base64-encoded-image-data>",
+  "thumbnail": "<base64-encoded-thumbnail>"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "filename": "1706234567890-abc123def456.jpg"
+}
+```
+
+## Conversations (Direct Messages)
+
+### `GET /conversations`
+
+List all conversations for the current user.
+
+**Response:** `200 OK`
+
+```json
+{
+  "conversations": [
+    {
+      "id": "conv123",
+      "participants": ["user456", "user789"],
+      "lastMessageAt": 1706234567890,
+      "otherUser": {
+        "id": "user789",
+        "userName": "other-user"
+      }
+    }
+  ]
+}
+```
+
+### `POST /conversations`
+
+Create or get a conversation with another user.
+
+**Request:**
+
+```json
+{
+  "targetUserId": "user789"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "conversation": {
+    "id": "conv123",
+    "participants": ["user456", "user789"],
+    "otherUser": {
+      "id": "user789",
+      "userName": "other-user"
+    }
+  },
+  "isNew": true
+}
+```
+
+### `GET /conversations/:conversationId/messages`
+
+Get messages in a conversation. Only participants can access.
+
+**Query parameters:**
+
+- `limit` (optional): Maximum messages to return (default: 50)
+- `before` (optional): Get messages before this message ID
+
+**Response:** `200 OK`
+
+```json
+{
+  "messages": [
+    {
+      "id": "msg123",
+      "channelId": "conv123",
+      "author": {
+        "id": "user456",
+        "userName": "user"
+      },
+      "content": "Hey!",
+      "createdAt": 1706234567890
+    }
+  ]
+}
+```
+
+### `POST /conversations/:conversationId/messages`
+
+Send a direct message.
+
+**Request:**
+
+```json
+{
+  "content": "Hey!"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "message": {
+    "id": "msg123",
+    "channelId": "conv123",
+    "author": {
+      "id": "user456",
+      "userName": "user"
+    },
+    "content": "Hey!",
+    "createdAt": 1706234567890
+  }
+}
+```
+
+### `PUT /conversations/:conversationId/messages/:messageId`
+
+Edit a direct message. Users can only edit their own messages.
+
+**Request:**
+
+```json
+{
+  "content": "Updated message"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "message": {
+    "id": "msg123",
+    "content": "Updated message",
+    "updatedAt": 1706234800000
+  }
+}
+```
+
+### `DELETE /conversations/:conversationId/messages/:messageId`
+
+Delete a direct message.
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true
+}
+```
+
+### `POST /conversations/:conversationId/messages/image`
+
+Upload an image in a conversation. Same base64 JSON format as channel image uploads.
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "filename": "1706234567890-abc123def456.jpg"
+}
+```
+
+### `GET /conversations/:conversationId/messages/image/:filename`
+
+Download an image from a conversation. Only participants can access.
+
+**Query parameters:**
+
+- `size` (optional): Set to `"thumb"` to get the thumbnail version
+
+**Response:** `200 OK`
+
+Returns the image data with appropriate `Content-Type` header.
+
+## Server Settings
+
+### `GET /server/settings`
+
+Get server settings.
+
+**Response:** `200 OK`
+
+```json
+{
+  "name": "My Team Chat"
+}
+```
+
+### `PUT /server/settings`
+
+Update server settings. Requires admin.
+
+**Request:**
+
+```json
+{
+  "name": "New Server Name"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "name": "New Server Name"
+}
+```
+
+## Webhooks
+
+Webhooks allow external services to post messages to channels programmatically. Each webhook is scoped to a single channel and uses a static Bearer token for authentication.
+
+### `GET /webhooks`
+
+List all webhooks. Requires admin. Tokens are stripped from the response.
+
+**Response:** `200 OK`
+
+```json
+{
+  "webhooks": [
+    {
+      "id": "wh123",
+      "name": "GitHub Bot",
+      "channelId": "abc123",
+      "createdAt": 1706234567890,
+      "createdBy": "user456"
+    }
+  ]
+}
+```
+
+### `POST /webhooks`
+
+Create a new webhook. Requires admin. The token is returned only once at creation.
+
+**Request:**
+
+```json
+{
+  "name": "GitHub Bot",
+  "channelId": "abc123"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "webhook": {
+    "id": "wh123",
+    "name": "GitHub Bot",
+    "channelId": "abc123",
+    "token": "a1b2c3d4e5f6...",
+    "createdAt": 1706234567890,
+    "createdBy": "user456"
+  }
+}
+```
+
+### `DELETE /webhooks/:webhookId`
+
+Delete a webhook. Requires admin.
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true
+}
+```
+
+### `POST /webhooks/:webhookId/messages`
+
+Post a message to a channel via webhook. Uses webhook token authentication instead of JWT.
+
+**Headers:**
+
+```text
+Authorization: Bearer <webhook-token>
+```
+
+**Request:**
+
+```json
+{
+  "content": "Build #42 passed successfully!"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "message": {
+    "id": "msg123",
+    "channelId": "abc123",
+    "content": "Build #42 passed successfully!",
+    "author": {
+      "id": "webhook:wh123",
+      "userName": "GitHub Bot",
+      "isBot": true
+    },
+    "createdAt": 1706234567890
+  }
+}
+```
+
+Webhook messages appear in the channel with a "BOT" badge next to the author name.
+
+## Presence
+
+### `GET /presence`
+
+List current user presence states.
+
+**Response:** `200 OK`
+
+```json
+{
+  "presence": [
+    {
+      "userId": "user456",
+      "status": "online",
+      "lastSeen": 1706234567890
+    }
+  ]
+}
+```
+
+### `PUT /presence/me`
+
+Update the current user's presence.
+
+**Request:**
+
+```json
+{
+  "status": "away"
+}
+```
+
+Valid statuses are `online`, `away`, and `offline`.
+
+## Admin Operations
+
+### `GET /admin/export`
+
+Export server data for backup or migration. Requires admin. Webhook tokens and password hashes are not included.
+
+**Response:** `200 OK`
+
+```json
+{
+  "exportedAt": 1706234567890,
+  "users": [],
+  "channels": [],
+  "messages": [],
+  "conversations": [],
+  "serverSettings": {},
+  "webhooks": [],
+  "auditLog": []
+}
+```
+
+### `GET /admin/audit-log`
+
+List recent administrative audit events. Requires admin.
+
+**Query parameters:**
+
+- `limit` (optional): Maximum entries to return (default: 100)
+
+**Response:** `200 OK`
+
+```json
+{
+  "entries": [
+    {
+      "id": "audit123",
+      "action": "channel.create",
+      "actorId": "user456",
+      "targetType": "channel",
+      "targetId": "abc123",
+      "createdAt": 1706234567890
+    }
+  ]
+}
+```
+
+## Real-time Events
+
+### `GET /events`
+
+Server-Sent Events endpoint for real-time updates. Authentication can be provided via query parameter (`?token=<jwt>`) or `Authorization` header.
+
+**Connection:**
+
+```text
+GET /events?token=<your-jwt-token>
+Accept: text/event-stream
+```
+
+On connection, you receive a `CONNECTED` event:
+
+```text
+data: {"type":"CONNECTED","payload":{"message":"SSE connection established","timestamp":"...","userId":"abc123","connectionId":"..."}}
+```
+
+**Events:**
+
+All events are sent as `data:` lines (no `event:` header). Each event has a `type` and `payload`:
+
+```text
+data: {"type":"NEW_MESSAGE","payload":{"id":"msg123","channelId":"abc123","author":{"id":"user456","userName":"user"},"content":"Hello!","createdAt":1706234567890}}
+
+data: {"type":"UPDATE_MESSAGE","payload":{"id":"msg123","content":"Updated","updatedAt":1706234600000}}
+
+data: {"type":"DELETE_MESSAGE","payload":{"id":"msg123","channelId":"abc123"}}
+
+data: {"type":"NEW_CHANNEL","payload":{"id":"ch123","name":"general","createdAt":1706234567890}}
+
+data: {"type":"UPDATE_CHANNEL","payload":{"id":"ch123","name":"renamed"}}
+
+data: {"type":"DELETE_CHANNEL","payload":{"id":"ch123","name":"old-channel"}}
+
+data: {"type":"NEW_REACTION","payload":{"messageId":"msg123","userId":"user456","reaction":"👍"}}
+
+data: {"type":"DELETE_REACTION","payload":{"messageId":"msg123","userId":"user456","reaction":"👍"}}
+
+data: {"type":"NEW_USER","payload":{"id":"user789","userName":"newuser","email":"new@example.com"}}
+
+data: {"type":"REMOVE_USER","payload":{"id":"user789","email":"removed@example.com"}}
+
+data: {"type":"USER_EXIT","payload":{"id":"user789","userName":"exited-user"}}
+
+data: {"type":"UPDATE_USER","payload":{"id":"user789","userName":"new-display-name"}}
+
+data: {"type":"NEW_CONVERSATION","payload":{"id":"conv123","participants":["user456","user789"],"createdAt":1706234567890}}
+
+data: {"type":"NEW_DM_MESSAGE","payload":{"id":"msg123","channelId":"conv123","author":{"id":"user456","userName":"user"},"content":"Hey!","participants":["user456","user789"]}}
+
+data: {"type":"UPDATE_DM_MESSAGE","payload":{"id":"msg123","content":"Updated","participants":["user456","user789"]}}
+
+data: {"type":"DELETE_DM_MESSAGE","payload":{"id":"msg123","conversationId":"conv123","participants":["user456","user789"]}}
+
+data: {"type":"NEW_THREAD_REPLY","payload":{"parentMessageId":"msg123","channelId":"abc123","reply":{...},"threadMeta":{...}}}
+
+data: {"type":"UPDATE_THREAD_REPLY","payload":{...}}
+
+data: {"type":"DELETE_THREAD_REPLY","payload":{"id":"reply123","threadId":"msg123","channelId":"abc123","threadMeta":{...}}}
+
+data: {"type":"NEW_WEBHOOK","payload":{"id":"wh123","name":"GitHub Bot","channelId":"abc123"}}
+
+data: {"type":"DELETE_WEBHOOK","payload":{"id":"wh123","channelId":"abc123"}}
+
+data: {"type":"UPDATE_SERVER_SETTINGS","payload":{"name":"New Server Name"}}
+
+data: {"type":"PRESENCE_UPDATE","payload":{"userId":"user456","status":"online","lastSeen":1706234567890}}
+```
+
+DM events (`NEW_DM_MESSAGE`, `UPDATE_DM_MESSAGE`, `DELETE_DM_MESSAGE`) are only sent to the conversation participants. Private channel events and messages are only sent to channel members and admins.
+
+## Error Responses
+
+All errors return a JSON object with an `error` field:
+
+```json
+{
+  "error": "Error message here"
+}
+```
+
+Common status codes:
+
+- `400 Bad Request` - Invalid request body or parameters
+- `401 Unauthorized` - Missing or invalid authentication
+- `403 Forbidden` - Insufficient permissions
+- `404 Not Found` - Resource not found
+- `429 Too Many Requests` - Rate limit exceeded
+- `500 Internal Server Error` - Server error
