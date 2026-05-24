@@ -11,8 +11,6 @@ lib/
 # Dependencies and package manager artifacts
 node_modules/
 /**/node_modules
-package-lock.json
-!docs/package-lock.json
 yarn.lock
 .yarn-integrity
 .npm
